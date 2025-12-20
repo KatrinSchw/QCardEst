@@ -53,4 +53,18 @@ The important setting options are:
 - prefix : Prefix for the result filename
 - reps : Number of layers of the VQC 
 
+## Additional Documentation and Analysis
+
+This fork extends the original implementation with:
+- Extended evaluation and analysis
+- Reproducible plots and experiment scripts
+- LaTeX documentation of the hybrid quantum-classical model and experiments
+
+### Documentation
+- `docs/01_preliminaries.tex`: Background and related work
+- `docs/02_hybrid_model.tex`: Compact encoding and hybrid VQC model
+- `docs/03_evaluation.tex`: Experimental setup and results
+
+### Analysis
+- `analysis/`: Evaluation plots and post-processing scripts
 

@@ -4,14 +4,9 @@ Shows QCardEst (Estimation) and QCardCorr (Correction) with PostgreSQL baseline.
 """
 
 import numpy as np
-import pandas as pd
 import matplotlib.pyplot as plt
 from pathlib import Path
 import math
-
-def load_solution_file(sl_csv_path):
-    df = pd.read_csv(sl_csv_path)
-    return df
 
 def load_baseline_data(csv_path):
     data = []
@@ -72,34 +67,33 @@ def parse_filename(filename):
     
     return layer_name, value_type
 
-def get_error_from_solution(df, value_type, baseline_data=None):
-    errors = []
-    
-    for idx, row in df.iterrows():
-        pred_log = row['prediction']
-        true_log = row['expected']
-        
-        if value_type == 'rows':
-            error = abs(pred_log - true_log)
-            errors.append(error)
-        elif value_type == 'rowFactor':
-            if baseline_data is None or idx >= len(baseline_data):
-                continue
-            correction_factor_log = pred_log
-            correction_factor = math.exp(correction_factor_log)
-            baseline_pred = baseline_data[idx]['predicted']
-            corrected_card = correction_factor * baseline_pred
-            true_card = baseline_data[idx]['true']
-            error = abs(math.log(corrected_card) - math.log(true_card))
-            errors.append(error)
-        else:
-            continue
-    
-    return errors
+def get_mean_diffcards_from_results(results_csv_path):
+    """
+    Read the final line from a results CSV file and extract mean_diffCards.
+    The CSV format is: episode, [13 stats values]
+    mean_diffCards is at index 6 in the stats array, which corresponds to column index 7
+    in the CSV (0-indexed, where column 0 is the episode number).
+    """
+    try:
+        with open(results_csv_path, 'r') as f:
+            lines = f.readlines()
+            if not lines:
+                return None
+            
+            last_line = lines[-1].strip()
+            parts = last_line.split(',')
+            
+            if len(parts) < 14:
+                return None
+            
+            mean_diffcards = float(parts[7])
+            return mean_diffcards
+    except (FileNotFoundError, ValueError, IndexError) as e:
+        print(f"Error reading {results_csv_path}: {e}")
+        return None
 
 def main():
     results_dir = Path("results")
-    solutions_dir = results_dir / "solutions"
     costs_dir = Path("costs/stats")
     figures_dir = Path("analysis/figures")
     figures_dir.mkdir(parents=True, exist_ok=True)
@@ -115,26 +109,20 @@ def main():
     
     print(f"PostgreSQL baseline error: {postgres_error:.2f}")
     
-    solution_files = list(solutions_dir.glob("Paper_*stats-statsCards6*.sl.csv"))
+    results_files = list(results_dir.glob("Paper_*stats-statsCards6*.csv"))
     
     layers_data = {}
     
-    for sol_file in solution_files:
-        layer_name, value_type = parse_filename(sol_file.name)
+    for results_file in results_files:
+        layer_name, value_type = parse_filename(results_file.name)
         if not layer_name or not value_type:
             continue
         if layer_name not in layers_data:
             layers_data[layer_name] = {}
         
-        df = load_solution_file(sol_file)
-        
-        baseline_data = baseline_postgres
-        
-        errors = get_error_from_solution(df, value_type, baseline_data if value_type == 'rowFactor' else None)
-        
-        if len(errors) > 0:
-            mean_error = np.mean(errors)
-            layers_data[layer_name][value_type] = mean_error
+        mean_diffcards = get_mean_diffcards_from_results(results_file)
+        if mean_diffcards is not None:
+            layers_data[layer_name][value_type] = mean_diffcards
     
     layer_names = sorted(layers_data.keys())
     
@@ -214,7 +202,7 @@ def main():
     ax.set_yticklabels(display_layers)
     ax.set_xlabel('Mean error difference', fontsize=12)
     ax.set_ylabel('Classical layer', fontsize=12)
-    ax.set_title('STATS benchmark: The black line is the cardinality\nestimation of PostgreSQL', 
+    ax.set_title('STATS benchmark: comparison figure for all classical layers', 
                  fontsize=11, pad=20)
     ax.legend(loc='lower right', fontsize=10)
     ax.grid(True, alpha=0.3, axis='x')

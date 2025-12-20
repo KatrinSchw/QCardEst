@@ -272,3 +272,4 @@ def fromString(s, model, env) -> Interpretation:
             return PlaceValueSystem(model, env, length=int(arg), negativ=True)
 
     return LinearScale(model, env)
+    

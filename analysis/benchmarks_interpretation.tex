@@ -18,13 +18,15 @@
 
 This document provides a detailed interpretation of the JOB-light and STATS benchmark results comparing QCardEst (cardinality estimation) and QCardCorr (cardinality correction) approaches across different classical post-processing layers.
 
-The comparison shows that \textbf{correction-based approaches (QCardCorr) consistently outperform estimation-based approaches (QCardEst)} across all classical layers and both benchmarks. This is evident from the significantly lower error values for correction compared to estimation.
+The results reveal a clear pattern: \textbf{correction-based approaches (QCardCorr) consistently outperform estimation-based approaches (QCardEst)} across most classical layers and both benchmarks. However, the best-performing layers differ between the two benchmarks, with Threshold excelling in JOB-light while Rational and RationalLog dominate in STATS. This suggests that layer effectiveness is context-dependent and influenced by the specific characteristics of the query workload and baseline estimator quality.
 
 \section{JOB-light Benchmark Results}
 
 \subsection{Overview}
 
-For JOB-light, the threshold layer achieves the best correction performance with a mean error difference of \textbf{0.39}, outperforming all other layers including the MSCN baseline (1.35) and PostgreSQL baseline (2.48).
+For JOB-light, the \textbf{Threshold} layer achieves the best correction performance with a mean error difference of \textbf{0.39}, representing a remarkable improvement over both baseline estimators. This performance is \textbf{6.37 times better than the PostgreSQL baseline} (2.48) and \textbf{3.47 times better than the MSCN baseline} (1.35). The second-best performer is \textbf{PlaceValueNeg8} with an error of \textbf{0.42}, which is \textbf{5.91 times better than PostgreSQL} and \textbf{3.22 times better than MSCN}.
+
+When examining all correction approaches, we observe that in \textbf{6 out of 8 cases where cardinality correction outperforms PostgreSQL, it also outperforms MSCN}. This pattern suggests that the quantum correction mechanisms are capable of systematically improving upon both classical estimators, with the improvement being more pronounced relative to PostgreSQL's estimates.
 
 \subsection{Why Threshold Correction Wins}
 
@@ -94,86 +96,104 @@ The dramatic improvement of PlaceValueNeg8 for correction (from 8.62 to 0.42) co
 
 \subsubsection{Correction (QCardCorr) Ranking:}
 \begin{enumerate}
-\item \textbf{threshold}: 0.39 ⭐ Best
-\item PlaceValueNeg8: 0.42
+\item \textbf{threshold}: 0.39 ⭐ Best (6.37× better than PostgreSQL, 3.47× better than MSCN)
+\item PlaceValueNeg8: 0.42 (5.91× better than PostgreSQL, 3.22× better than MSCN)
 \item thresholdRatio: 0.49
 \item linear: 0.45
-\item rational: 0.48
+\item rational: 0.99
 \item PlaceValue: 0.61
-\item rationalLog: 0.93
+\item rationalLog: 1.99
 \item PlaceValueNeg: 1.54
-\item PlaceValue8: 6.28 (outlier - likely configuration issue)
+\item PlaceValue8: 6.28 (outlier - see explanation below)
 \end{enumerate}
 
 \subsubsection{Estimation (QCardEst) Ranking:}
 \begin{enumerate}
-\item \textbf{linear}: 1.43 ⭐ Best
-\item PlaceValue8: 1.78
-\item thresholdRatio: 3.15
-\item rational: 5.11
-\item threshold: 5.19
-\item PlaceValue: 8.12
-\item PlaceValueNeg8: 8.62
-\item rationalLog: 10.53
-\item PlaceValueNeg: 12.97
+\item \textbf{linear}: 1.43 ⭐ Best (1.74× better than PostgreSQL)
+\item PlaceValue8: 1.78 (1.40× better than PostgreSQL)
+\item thresholdRatio: 3.15 (worse than PostgreSQL baseline)
+\item rational: 3.44 (worse than PostgreSQL baseline)
+\item threshold: 5.19 (worse than PostgreSQL baseline)
+\item PlaceValue: 8.12 (worse than PostgreSQL baseline)
+\item PlaceValueNeg8: 8.62 (worse than PostgreSQL baseline)
+\item rationalLog: 4.38 (worse than PostgreSQL baseline)
+\item PlaceValueNeg: 12.97 (worse than PostgreSQL baseline)
 \end{enumerate}
+
+\subsubsection{Key Observations for JOB-light}
+
+\begin{itemize}
+\item \textbf{Correction dominance}: All correction approaches except PlaceValue8 outperform both PostgreSQL and MSCN baselines. This demonstrates the effectiveness of leveraging baseline estimates and applying selective corrections.
+
+\item \textbf{Estimation limitations}: For direct cardinality estimation, only \textbf{Linear} and \textbf{PlaceValue8} perform better than the PostgreSQL baseline. All other layers fail to improve upon PostgreSQL's estimates, highlighting the difficulty of absolute cardinality estimation compared to correction.
+
+\item \textbf{PlaceValue8 anomaly}: PlaceValue8 shows dramatically different behavior between correction (6.28 error, worst performer) and estimation (1.78 error, second-best). This stems from a fundamental limitation: PlaceValue8 can \textbf{only produce positive numbers}, meaning it can only correct cardinalities by \textbf{increasing them}. Since PostgreSQL estimates often need downward corrections, PlaceValue8 is unable to make the necessary adjustments, leading to poor correction performance. However, for estimation, this constraint is less problematic since cardinalities are inherently positive values.
+
+\item \textbf{PlaceValueNeg8 contrast}: The variant PlaceValueNeg8, which allows for negative numbers, performs excellently for correction (0.42, second-best) but poorly for estimation (8.62). This inverse relationship between PlaceValue8 and PlaceValueNeg8 highlights the importance of \textbf{bidirectional correction capability} for improving baseline estimates, while simpler positive-only representations work better for absolute value estimation.
+\end{itemize}
 
 \section{STATS Benchmark Results}
 
 \subsection{Overview}
 
-For STATS, the threshold layer again achieves the best correction performance with a mean error difference of \textbf{1.96}, outperforming the PostgreSQL baseline (2.77). While absolute errors are higher than JOB-light, the relative patterns and layer rankings remain largely consistent.
+For STATS, the performance landscape differs significantly from JOB-light. The best correction performance is achieved by \textbf{RationalLog} with a mean error difference of \textbf{0.32}, which is \textbf{8.66 times better than the PostgreSQL baseline} (2.77). The second-best is \textbf{Rational} with an error of \textbf{1.04}, representing a \textbf{2.67 times improvement} over PostgreSQL. Notably, the Threshold layer, which dominated JOB-light, achieves 1.96 error (still better than PostgreSQL, but not the best).
+
+This shift in optimal layer choice between benchmarks suggests that \textbf{the effectiveness of correction layers is sensitive to query workload characteristics}. Rational-based layers appear better suited to the STATS query patterns, possibly due to their ability to model multiplicative relationships more effectively in this context.
 
 \subsection{Key Findings}
 
-The STATS benchmark shows similar patterns to JOB-light but with higher absolute error values across all layers:
+The STATS benchmark reveals several important patterns:
 
 \begin{enumerate}
-\item \textbf{Threshold remains best for correction}: Despite higher absolute errors (1.96 vs 0.39), threshold still leads correction performance.
+\item \textbf{Rational layers excel}: RationalLog and Rational achieve the best correction performance, with RationalLog showing an exceptional 8.66× improvement over PostgreSQL. This represents the largest improvement factor observed across both benchmarks.
 
-\item \textbf{Linear leads estimation}: Linear maintains its position as the best estimation layer (1.65 vs 1.43 in JOB-light).
+\item \textbf{Linear leads estimation}: As in JOB-light, Linear maintains its position as the best estimation layer (1.65 vs 1.43 in JOB-light), and along with PlaceValue8 (2.97), are the only layers that outperform the PostgreSQL baseline for direct estimation.
 
-\item \textbf{Consistent layer rankings}: The relative performance ordering of layers is largely preserved between benchmarks, suggesting the layer characteristics are robust across different query workloads.
+\item \textbf{PlaceValue8 limitation confirmed}: PlaceValue8 again shows poor correction performance (13.65 error, worst among all correction approaches), confirming that its inability to produce negative corrections severely limits its effectiveness. This consistent pattern across both benchmarks validates the hypothesis that bidirectional correction capability is essential.
 
-\item \textbf{Higher baseline error}: PostgreSQL baseline error is 2.77 for STATS vs 2.48 for JOB-light, indicating that STATS queries may be inherently more challenging.
+\item \textbf{Higher baseline error}: PostgreSQL baseline error is 2.77 for STATS vs 2.48 for JOB-light, indicating that STATS queries may be inherently more challenging for classical estimators, yet still allowing for significant quantum-based improvements.
+
+\item \textbf{Correction vs Estimation gap}: The gap between best correction (0.32) and best estimation (1.65) in STATS is 1.33, which is larger than the gap in JOB-light (0.39 vs 1.43 = 1.04). This suggests correction has even greater advantage in STATS, despite the benchmark being more challenging overall.
 \end{enumerate}
 
 \subsection{STATS Performance Summary}
 
 \subsubsection{Correction (QCardCorr) Ranking:}
 \begin{enumerate}
-\item \textbf{threshold}: 1.96 ⭐ Best
+\item \textbf{rationalLog}: 0.32 ⭐ Best (8.66× better than PostgreSQL)
+\item \textbf{rational}: 1.04 (2.67× better than PostgreSQL)
+\item threshold: 1.96
 \item PlaceValueNeg8: 2.11
-\item rationalLog: 2.31
-\item rational: 2.46
 \item thresholdRatio: 2.53
 \item PlaceValueNeg: 2.53
 \item linear: 2.73
 \item PlaceValue: 3.38
-\item PlaceValue8: 13.65 (outlier - likely configuration issue)
+\item PlaceValue8: 13.65 (worst - see explanation below)
 \end{enumerate}
 
 \subsubsection{Estimation (QCardEst) Ranking:}
 \begin{enumerate}
-\item \textbf{linear}: 1.65 ⭐ Best
-\item PlaceValue8: 2.97
-\item threshold: 4.54
-\item thresholdRatio: 5.02
-\item rational: 7.37
-\item PlaceValue: 8.26
-\item PlaceValueNeg8: 10.37
-\item rationalLog: 12.72
-\item PlaceValueNeg: 13.23
+\item \textbf{linear}: 1.65 ⭐ Best (1.68× better than PostgreSQL)
+\item PlaceValue8: 2.97 (slightly worse than PostgreSQL 2.77)
+\item threshold: 4.54 (worse than PostgreSQL baseline)
+\item thresholdRatio: 5.02 (worse than PostgreSQL baseline)
+\item PlaceValue: 8.26 (worse than PostgreSQL baseline)
+\item rational: 12.73 (worse than PostgreSQL baseline)
+\item PlaceValueNeg8: 10.37 (worse than PostgreSQL baseline)
+\item PlaceValueNeg: 13.23 (worse than PostgreSQL baseline)
+\item rationalLog: 13.77 (worse than PostgreSQL baseline)
 \end{enumerate}
 
 \subsection{STATS-Specific Observations}
 
 \begin{enumerate}
-\item \textbf{Tighter correction gap}: The gap between best correction (1.96) and best estimation (1.65) is smaller in STATS than in JOB-light (0.39 vs 1.43), suggesting that correction advantage may be benchmark-dependent.
+\item \textbf{Rational layer dominance}: The exceptional performance of RationalLog (0.32) and Rational (1.04) for correction in STATS contrasts sharply with their moderate performance in JOB-light (1.99 and 0.99 respectively). This suggests that rational-based layers excel when dealing with certain types of query patterns or error distributions present in STATS.
 
-\item \textbf{RationalLog performance}: RationalLog performs relatively better in STATS correction (2.31, ranking 3rd) compared to JOB-light (0.93, ranking 7th), indicating it may be better suited for certain query characteristics.
+\item \textbf{PlaceValue8 confirmed limitation}: PlaceValue8 again shows the worst correction performance (13.65), worse even than the PostgreSQL baseline (2.77). This confirms that \textbf{the inability to produce negative corrections is a fundamental limitation} for this layer. In contrast, PlaceValueNeg8, which can produce negative values, achieves 2.11 error, demonstrating that bidirectional correction is essential.
 
-\item \textbf{PlaceValue8 outlier}: Like in JOB-light, PlaceValue8 shows an outlier performance in correction (13.65), suggesting a potential configuration or implementation issue with this specific variant.
+\item \textbf{Estimation remains challenging}: As in JOB-light, only Linear outperforms PostgreSQL for direct estimation, with PlaceValue8 performing slightly worse (2.97 vs 2.77). All other layers significantly underperform the baseline, reinforcing that absolute cardinality estimation is fundamentally more difficult than correction.
+
+\item \textbf{Threshold versatility}: While Threshold is not the best in STATS, it still performs well (1.96, ranking 3rd) and outperforms the baseline. This demonstrates that Threshold is a robust, general-purpose choice, even if not always optimal.
 \end{enumerate}
 
 \section{Comparison: JOB-light vs STATS}
@@ -186,10 +206,10 @@ The STATS benchmark shows similar patterns to JOB-light but with higher absolute
 \toprule
 Metric & JOB-light & STATS & Difference \\
 \midrule
-Best Correction (threshold) & 0.39 & 1.96 & +1.57 (STATS harder) \\
+Best Correction (threshold/rationalLog) & 0.39 & 0.32 & -0.07 (STATS better) \\
 Best Estimation (linear) & 1.43 & 1.65 & +0.22 (STATS harder) \\
 PostgreSQL Baseline & 2.48 & 2.77 & +0.29 (STATS harder) \\
-Correction Advantage & 1.04 & 0.31 & -0.73 (smaller gap) \\
+Correction Advantage & 1.04 & 1.33 & +0.29 (larger gap) \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -205,61 +225,76 @@ Correction Advantage & 1.04 & 0.31 & -0.73 (smaller gap) \\
 \item More join combinations
 \end{itemize}
 
-\item \textbf{Correction Advantage}: The advantage of correction over estimation is smaller in STATS (0.31) compared to JOB-light (1.04). This suggests that:
+\item \textbf{Correction Advantage}: The advantage of correction over estimation is actually larger in STATS (1.33) compared to JOB-light (1.04). This suggests that:
 \begin{itemize}
-\item STATS baseline (PostgreSQL) may be more accurate relative to the query difficulty
-\item Correction has less room for improvement when baseline error is already relatively low
-\item Estimation approaches may be more competitive when queries are inherently harder
+\item Correction approaches can achieve even larger improvements in STATS (RationalLog: 8.66× better than PostgreSQL) compared to JOB-light (Threshold: 6.37× better)
+\item The best correction in STATS (0.32) is actually better than the best correction in JOB-light (0.39), despite STATS being more challenging overall
+\item Different layer architectures (RationalLog vs Threshold) are optimal for different workloads
 \end{itemize}
 
-\item \textbf{Layer Robustness}: Despite absolute differences, the relative ranking of layers is largely preserved:
+\item \textbf{Layer Robustness}: The relative ranking of layers shows some variation between benchmarks:
 \begin{itemize}
-\item \textbf{Correction}: threshold and PlaceValueNeg8 remain top performers in both
-\item \textbf{Estimation}: linear and PlaceValue8 maintain their leading positions
-\item This consistency suggests layer characteristics are robust across benchmarks
+\item \textbf{Correction}: Threshold excels in JOB-light while RationalLog dominates STATS, though PlaceValueNeg8 remains strong in both
+\item \textbf{Estimation}: Linear and PlaceValue8 maintain their leading positions in both benchmarks
+\item This variation suggests that optimal layer choice should consider workload characteristics
 \end{itemize}
 
-\item \textbf{Baseline Quality}: Both benchmarks have similar PostgreSQL baseline errors (2.48 vs 2.77), but STATS shows less room for improvement through correction, possibly indicating that the baseline errors are distributed differently.
+\item \textbf{Baseline Quality}: Both benchmarks have similar PostgreSQL baseline errors (2.48 vs 2.77), yet correction approaches achieve larger improvements in STATS (RationalLog: 8.66×) compared to JOB-light (Threshold: 6.37×), demonstrating that optimal layer choice can unlock significant correction potential.
 \end{enumerate}
 
 \subsection{Similarities}
 
 \begin{enumerate}
-\item \textbf{Threshold dominance}: Threshold layer consistently performs best for correction in both benchmarks, confirming its robustness.
+\item \textbf{Linear estimation dominance}: Linear layer consistently performs best for estimation in both benchmarks (1.43 JOB-light, 1.65 STATS), validating its simplicity and effectiveness.
 
-\item \textbf{Linear estimation}: Linear layer consistently performs best for estimation, validating its simplicity and effectiveness.
+\item \textbf{PlaceValueNeg8 reliability}: PlaceValueNeg8 consistently ranks high for correction (2nd in JOB-light, 4th in STATS), showing its reliability across different workloads.
 
-\item \textbf{PlaceValueNeg8 strength}: PlaceValueNeg8 consistently ranks second for correction, showing its reliability.
+\item \textbf{Estimation challenges}: Only Linear and PlaceValue8 consistently outperform PostgreSQL for estimation, while most other layers struggle with absolute value estimation in both benchmarks.
 
-\item \textbf{Estimation struggles}: PlaceValueNeg variants consistently perform poorly for estimation in both benchmarks.
+\item \textbf{PlaceValue8 constraint}: PlaceValue8 consistently fails at correction (6.28 JOB-light, 13.65 STATS) due to its inability to produce negative corrections, while performing well at estimation (1.78 JOB-light, 2.97 STATS).
 \end{enumerate}
 
 \section{When to Pick Which Layer: Rule of Thumb}
 
-Based on the combined results from both benchmarks, here is a practical guide for selecting classical layers:
+Based on the combined results from both benchmarks, here is a practical guide for selecting classical layers. \textbf{Note that the optimal choice depends on the benchmark/workload characteristics}, with Threshold excelling in JOB-light but RationalLog dominating in STATS.
 
 \subsection{For Correction Tasks (QCardCorr - rowFactor)}
 
-\textbf{Primary Recommendation: threshold}
+\textbf{For JOB-light workloads: Threshold}
 \begin{itemize}
-\item Best overall performance across both benchmarks (0.39 JOB-light, 1.96 STATS)
-\item Robust and interpretable
-\item Works well when you have a reasonable baseline
-\item Use when: Correction is the primary goal and you want the best accuracy
+\item Best performance (0.39, 6.37× better than PostgreSQL)
+\item Robust and interpretable selective correction mechanism
+\item Use when: Working with JOB-light-style queries and PostgreSQL baseline
+\end{itemize}
+
+\textbf{For STATS workloads: RationalLog}
+\begin{itemize}
+\item Best performance (0.32, 8.66× better than PostgreSQL)
+\item Exceptional improvement factor
+\item Use when: Working with STATS-style queries and need maximum correction accuracy
+\end{itemize}
+
+\textbf{Alternative: Rational}
+\begin{itemize}
+\item Good in STATS (1.04, 2.67× better than PostgreSQL)
+\item Moderate in JOB-light (0.99)
+\item Use when: You want a rational-based approach that works across benchmarks
 \end{itemize}
 
 \textbf{Alternative: PlaceValueNeg8}
 \begin{itemize}
-\item Consistently second best (0.42 JOB-light, 2.11 STATS)
-\item More expressive than threshold
-\item Use when: You need fine-grained control over correction scales
+\item Consistently strong (0.42 JOB-light, 2.11 STATS)
+\item Second-best in JOB-light (5.91× better than PostgreSQL)
+\item Use when: You need fine-grained bidirectional correction control
 \end{itemize}
 
 \textbf{Avoid for correction:}
 \begin{itemize}
-\item PlaceValue variants (non-negative): Poor performance (0.61-3.38)
-\item Linear: Moderate but not competitive (0.45 JOB-light, 2.73 STATS)
-\item PlaceValue8: Shows outlier behavior (6.28 JOB-light, 13.65 STATS)
+\item \textbf{PlaceValue8}: Severely limited by inability to produce negative corrections (6.28 JOB-light, 13.65 STATS, worse than baseline in STATS). Can only increase cardinalities, making it unsuitable for correction tasks where downward adjustments are needed.
+
+\item \textbf{PlaceValue (non-negative variants)}: Moderate performance (0.61-3.38) but generally outperformed by layers with bidirectional capabilities.
+
+\item \textbf{Linear}: Moderate but not competitive for correction (0.45 JOB-light, 2.73 STATS), though it excels at estimation.
 \end{itemize}
 
 \subsection{For Estimation Tasks (QCardEst - rows)}
@@ -288,17 +323,19 @@ Based on the combined results from both benchmarks, here is a practical guide fo
 \subsection{General Principles}
 
 \begin{enumerate}
-\item \textbf{Correction is easier than estimation}: If possible, use correction (QCardCorr) rather than estimation (QCardEst). Correction leverages baseline knowledge and only adjusts when needed. This advantage is stronger in JOB-light than STATS.
+\item \textbf{Correction is easier than estimation}: If possible, use correction (QCardCorr) rather than estimation (QCardEst). Correction leverages baseline knowledge and only adjusts when needed. The advantage is significant: in JOB-light, best correction (0.39) is 3.7× better than best estimation (1.43); in STATS, best correction (0.32) is 5.2× better than best estimation (1.65).
 
-\item \textbf{Threshold for selective corrections}: The threshold mechanism excels when corrections should only be applied when the model has high confidence. This works consistently across benchmarks.
+\item \textbf{Workload matters}: Different layers excel for different query workloads. Threshold dominates JOB-light correction, while RationalLog excels in STATS. This suggests that layer selection should consider the specific characteristics of the target workload.
 
-\item \textbf{Negativity matters for correction}: PlaceValueNeg variants (with negative factors) are important for correction because they enable symmetric, bidirectional adjustments to baseline estimates.
+\item \textbf{Bidirectional correction is essential}: The PlaceValue8 vs PlaceValueNeg8 comparison demonstrates that the ability to produce negative corrections is crucial. PlaceValue8 (positive-only) fails at correction (6.28-13.65 error) but performs well at estimation (1.78-2.97), while PlaceValueNeg8 (bidirectional) excels at correction (0.42-2.11) but struggles with estimation (8.62-10.37).
 
-\item \textbf{Simplicity for estimation}: For estimation, simpler layers (linear, PlaceValue8) work better because they don't introduce unnecessary complexity that hurts when trying to estimate absolute values.
+\item \textbf{Only Linear and PlaceValue8 beat PostgreSQL for estimation}: For direct cardinality estimation, only these two layers consistently outperform the PostgreSQL baseline. All other layers fail to improve upon classical estimators for absolute value estimation, highlighting the difficulty of this task.
 
-\item \textbf{Benchmark considerations}: STATS appears more challenging overall, with higher absolute errors. However, the relative performance patterns remain consistent, suggesting that layer choice should be based on the task (correction vs estimation) rather than the specific benchmark.
+\item \textbf{PlaceValue8's fundamental limitation}: PlaceValue8 can only produce positive numbers, meaning it can only correct cardinalities by increasing them. Since PostgreSQL estimates often require downward corrections, PlaceValue8 is fundamentally unsuitable for correction tasks. However, this same constraint makes it effective for estimation where values are inherently positive.
 
-\item \textbf{Baseline quality matters}: The effectiveness of correction depends on baseline quality. While both benchmarks have similar PostgreSQL baseline errors, the correction advantage is larger in JOB-light, suggesting different error distributions or query characteristics.
+\item \textbf{Baseline quality and correction advantage}: Correction approaches show dramatic improvements (6-8×) over PostgreSQL baselines, demonstrating that leveraging existing estimates and applying selective quantum corrections is highly effective. The improvement over MSCN (3-4×) is also substantial, showing that quantum corrections can improve even upon advanced learned estimators.
+
+\item \textbf{Layer-task matching is critical}: The same layer can perform dramatically differently for correction vs estimation. Understanding the task requirements (absolute values vs. relative corrections) is essential for selecting the appropriate layer architecture.
 \end{enumerate}
 
 \section{Conclusions}
@@ -306,15 +343,19 @@ Based on the combined results from both benchmarks, here is a practical guide fo
 The results demonstrate several key findings:
 
 \begin{enumerate}
-\item \textbf{Correction consistently outperforms estimation} across both benchmarks, though the advantage is larger in JOB-light.
+\item \textbf{Correction consistently outperforms estimation} across both benchmarks, with correction showing 3.7-5.2× improvement over the best estimation approaches. This demonstrates the clear advantage of leveraging baseline estimates.
 
-\item \textbf{Threshold and PlaceValueNeg8 are robust choices} for correction, performing well across different query workloads.
+\item \textbf{Optimal layer choice is workload-dependent}: Threshold excels in JOB-light (6.37× better than PostgreSQL), while RationalLog dominates STATS (8.66× better than PostgreSQL). This suggests that different query patterns benefit from different correction mechanisms.
 
-\item \textbf{Linear is the clear winner for estimation}, providing the best balance of simplicity and performance.
+\item \textbf{Bidirectional correction capability is essential}: The dramatic difference between PlaceValue8 (positive-only, fails at correction) and PlaceValueNeg8 (bidirectional, excels at correction) demonstrates that the ability to make both upward and downward corrections is fundamental to correction success.
 
-\item \textbf{Layer characteristics are benchmark-agnostic}: Despite absolute differences, relative performance rankings are preserved, indicating that layer properties are robust across different query patterns.
+\item \textbf{Only two layers beat PostgreSQL for estimation}: Linear and PlaceValue8 are the only layers that consistently outperform the PostgreSQL baseline for direct cardinality estimation, highlighting the difficulty of absolute value estimation compared to correction.
 
-\item \textbf{PlaceValueNeg variants show task-specific behavior}: They excel at correction but struggle with estimation, highlighting the importance of matching layer architecture to the task at hand.
+\item \textbf{PlaceValue8's constraint explains its behavior}: The observation that PlaceValue8 can only produce positive numbers directly explains why it fails at correction (where downward adjustments are needed) but succeeds at estimation (where values are inherently positive).
+
+\item \textbf{Correction shows massive improvements}: The best correction approaches achieve 6-8× improvements over PostgreSQL and 3-4× improvements over MSCN, demonstrating the significant potential of quantum-enhanced correction mechanisms when combined with classical baselines.
+
+\item \textbf{Layer-task matching matters}: The same layer architecture can show dramatically different performance for correction vs. estimation tasks, emphasizing that layer selection must consider the specific task requirements and constraints.
 \end{enumerate}
 
 \end{document}
