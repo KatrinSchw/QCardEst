@@ -2,15 +2,12 @@
 pyrightconfig.json
 settings.json
 
-# Generated analysis files
 analysis/figures/
 analysis/results_summary.md
 
-# OS files
 .DS_Store
 **/.DS_Store
 
-# Results and models (large generated files)
 results/*.csv
 results/solutions/
 results/models/

@@ -1,9 +1,5 @@
 # QCardEst/QCardCorr: Key Computation Functions Guide
 
-This guide identifies the most important functions, inputs, and parts that show how results are computed for **QCardEst** (cardinality estimation) and **QCardCorr** (cardinality correction).
-
-## Overview: QCardEst vs QCardCorr
-
 The difference between QCardEst and QCardCorr is controlled by the `valueType` setting:
 
 - **QCardEst**: `valueType = "rows"` → Direct cardinality prediction

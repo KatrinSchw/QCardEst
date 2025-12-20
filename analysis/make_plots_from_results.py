@@ -1,14 +1,22 @@
 """
 Plotting script for QCardEst results.
 
-Creates two types of plots:
+Creates two types of plots for the best results:
 - Training curve (loss per episode)
 - Prediction quality (true vs predicted scatter + error distribution)
+
+Generates plots for:
+- 2 best JOB-light Correction results
+- 2 best JOB-light Estimation results
+- 2 best STATS Correction results
+- 2 best STATS Estimation results
 """
 
 import numpy as np
+import pandas as pd
 import matplotlib.pyplot as plt
 from pathlib import Path
+import math
 
 
 def load_training_log(csv_path):
@@ -74,6 +82,139 @@ def load_solutions(sl_csv_path):
         }
     except Exception as e:
         raise ValueError(f"Error loading solutions {sl_csv_path}: {e}")
+
+
+def load_baseline_data(csv_path):
+    data = []
+    with open(csv_path, 'r') as f:
+        for line in f:
+            parts = line.strip().split(',')
+            if len(parts) >= 6:
+                try:
+                    predicted_card = float(parts[3].strip())
+                    true_card = float(parts[5].strip())
+                    data.append({
+                        'predicted': predicted_card,
+                        'true': true_card
+                    })
+                except (ValueError, IndexError):
+                    continue
+    return data
+
+
+def get_error_from_solution(df, value_type, baseline_data=None):
+    errors = []
+    
+    for idx, row in df.iterrows():
+        pred_log = row['prediction']
+        true_log = row['expected']
+        
+        if value_type == 'rows':
+            error = abs(pred_log - true_log)
+            errors.append(error)
+        elif value_type == 'rowFactor':
+            if baseline_data is None or idx >= len(baseline_data):
+                continue
+            correction_factor_log = pred_log
+            correction_factor = math.exp(correction_factor_log)
+            baseline_pred = baseline_data[idx]['predicted']
+            corrected_card = correction_factor * baseline_pred
+            true_card = baseline_data[idx]['true']
+            error = abs(math.log(corrected_card) - math.log(true_card))
+            errors.append(error)
+        else:
+            continue
+    
+    return errors
+
+
+def parse_filename_for_benchmark(filename):
+    parts = filename.split('_')
+    benchmark = None
+    value_type = None
+    layer_name = None
+    
+    for i, part in enumerate(parts):
+        if 'jobSimple-job' in part or part == 'job':
+            benchmark = 'JOB-light'
+            job_idx = i
+            if job_idx > 0:
+                layer_name = parts[job_idx - 1]
+            break
+        elif 'stats-statsCards6' in part or 'statsCards6' in part:
+            benchmark = 'STATS'
+            stats_idx = i
+            if stats_idx > 0:
+                layer_name = parts[stats_idx - 1]
+            break
+    
+    for i, part in enumerate(parts):
+        if part in ['rows', 'rowFactor']:
+            value_type = part
+            break
+    
+    if layer_name and ',' in layer_name:
+        layer_name = layer_name.replace(',', '')
+    
+    return benchmark, value_type, layer_name
+
+
+def parse_filename(base_name):
+    parts = base_name.split('_')
+    
+    if len(parts) == 0:
+        return {'prefix': 'Unknown', 'data': 'unknown', 'valueType': 'unknown', 'reps': '?', 'episodes': '?'}
+    
+    prefix = parts[0]
+    
+    data = "unknown"
+    valueType = "unknown"
+    reps = "?"
+    episodes = "?"
+    
+    valueType_keywords = ['rows', 'rowFactor', 'cost', 'costFactor']
+    for i, part in enumerate(parts):
+        if part in valueType_keywords:
+            valueType = part
+            if i > 0:
+                data = parts[i-1]
+            break
+    
+    for i, part in enumerate(parts):
+        if part in ['False', 'True'] and i + 1 < len(parts):
+            try:
+                reps = int(parts[i + 1])
+                break
+            except ValueError:
+                pass
+    
+    optimizer_keywords = ['Adam', 'SGD', 'RMSprop', 'sgd', 'adam']
+    for i, part in enumerate(parts):
+        if part in optimizer_keywords and i > 0:
+            try:
+                episodes = int(parts[i - 1])
+                break
+            except ValueError:
+                pass
+    
+    return {
+        'prefix': prefix,
+        'data': data,
+        'valueType': valueType,
+        'reps': reps,
+        'episodes': episodes
+    }
+
+
+def format_title(parsed_info):
+    parts = [
+        parsed_info['prefix'],
+        parsed_info['data'],
+        parsed_info['valueType'],
+        f"reps={parsed_info['reps']}",
+        f"episodes={parsed_info['episodes']}"
+    ]
+    return " | ".join(str(p) for p in parts)
 
 
 def plot_training_curve(episodes, loss, avg_loss, output_path, title_suffix=""):
@@ -145,206 +286,99 @@ def plot_prediction_quality(true, predicted, abs_error, log_error, output_path, 
     print(f"Saved prediction quality plot to {output_path}")
 
 
-def parse_filename(base_name):
-    parts = base_name.split('_')
-    
-    if len(parts) == 0:
-        return {'prefix': 'Unknown', 'data': 'unknown', 'valueType': 'unknown', 'reps': '?', 'episodes': '?'}
-    
-    prefix = parts[0]
-    
-    data = "unknown"
-    valueType = "unknown"
-    reps = "?"
-    episodes = "?"
-    
-    valueType_keywords = ['rows', 'rowFactor', 'cost', 'costFactor']
-    for i, part in enumerate(parts):
-        if part in valueType_keywords:
-            valueType = part
-            if i > 0:
-                data = parts[i-1]
-            break
-    
-    for i, part in enumerate(parts):
-        if part in ['False', 'True'] and i + 1 < len(parts):
-            try:
-                reps = int(parts[i + 1])
-                break
-            except ValueError:
-                pass
-    
-    optimizer_keywords = ['Adam', 'SGD', 'RMSprop', 'sgd', 'adam']
-    for i, part in enumerate(parts):
-        if part in optimizer_keywords and i > 0:
-            try:
-                episodes = int(parts[i - 1])
-                break
-            except ValueError:
-                pass
-    
-    return {
-        'prefix': prefix,
-        'data': data,
-        'valueType': valueType,
-        'reps': reps,
-        'episodes': episodes
-    }
-
-
-def format_title(parsed_info):
-    parts = [
-        parsed_info['prefix'],
-        parsed_info['data'],
-        parsed_info['valueType'],
-        f"reps={parsed_info['reps']}",
-        f"episodes={parsed_info['episodes']}"
-    ]
-    return " | ".join(str(p) for p in parts)
-
-
-def find_matching_files(results_dir="results"):
-    results_path = Path(results_dir)
-    training_files = list(results_path.glob("*.csv"))
-    solutions_dir = results_path / "solutions"
-    
-    matches = []
-    for train_file in training_files:
-        if train_file.parent != results_path:
-            continue
-        
-        base_name = train_file.stem
-        sol_file = solutions_dir / f"{base_name}.sl.csv"
-        
-        if sol_file.exists():
-            matches.append((train_file, sol_file, base_name))
-        else:
-            matches.append((train_file, None, base_name))
-    
-    return matches
-
-
-def select_best_plots(all_results):
-    best_training = None
-    best_prediction = None
-    best_training_loss = float('inf')
-    best_prediction_r2 = float('-inf')
-    
-    for result in all_results:
-        if result.get('training_loss') is not None:
-            if result['training_loss'] < best_training_loss:
-                best_training_loss = result['training_loss']
-                best_training = result
-        
-        if result.get('r2') is not None:
-            if result['r2'] > best_prediction_r2:
-                best_prediction_r2 = result['r2']
-                best_prediction = result
-    
-    return best_training, best_prediction
-
-
-def generate_results_summary(best_training, best_prediction, figures_dir):
-    summary_path = Path("analysis/results_summary.md")
-    
-    with open(summary_path, 'w') as f:
-        f.write("# Results Summary\n\n")
-        f.write("This page presents the key results from the QCardEst quantum machine learning experiments. ")
-        f.write("The plots below show the training dynamics and prediction quality of the best-performing model configurations.\n\n")
-        
-        f.write("## Training Curve\n\n")
-        if best_training:
-            title = best_training.get('title', 'Unknown')
-            plot_path = figures_dir / f"{best_training['base_name']}_training_curve.png"
-            rel_path = plot_path.relative_to(summary_path.parent)
-            f.write(f"**Configuration:** {title}\n\n")
-            f.write(f"![Training Curve]({rel_path})\n\n")
-        else:
-            f.write("*No training data available.*\n\n")
-        
-        f.write("## Prediction Quality\n\n")
-        if best_prediction:
-            title = best_prediction.get('title', 'Unknown')
-            plot_path = figures_dir / f"{best_prediction['base_name']}_prediction_quality.png"
-            rel_path = plot_path.relative_to(summary_path.parent)
-            f.write(f"**Configuration:** {title}\n\n")
-            f.write(f"![Prediction Quality]({rel_path})\n\n")
-        else:
-            f.write("*No prediction data available.*\n\n")
-        
-        f.write("## Interpretation\n\n")
-        f.write("The training curve shows how the model's loss decreases over training episodes, ")
-        f.write("indicating the learning progress of the quantum neural network. ")
-        f.write("A smooth, decreasing curve suggests stable training, while the rolling average ")
-        f.write("helps identify overall trends despite episode-to-episode fluctuations.\n\n")
-        
-        if best_prediction:
-            mae = best_prediction.get('mae', 'N/A')
-            rmse = best_prediction.get('rmse', 'N/A')
-            r2 = best_prediction.get('r2', 'N/A')
-            f.write(f"The prediction quality plot demonstrates how well the model's predictions align with true values. ")
-            f.write(f"The scatter plot (left) shows the relationship between predicted and actual cardinalities, ")
-            f.write(f"with points closer to the diagonal line indicating better predictions. ")
-            f.write(f"The error distribution (right) reveals the spread of prediction errors. ")
-            f.write(f"For this best-performing configuration, the model achieves MAE={mae:.3f}, RMSE={rmse:.3f}, and R²={r2:.3f}. ")
-            f.write(f"A higher R² value (closer to 1.0) indicates better predictive performance, while lower MAE and RMSE ")
-            f.write(f"values indicate smaller prediction errors.\n")
-        else:
-            f.write("The prediction quality plot demonstrates how well the model's predictions align with true values. ")
-            f.write("The scatter plot shows the relationship between predicted and actual values, ")
-            f.write("with points closer to the diagonal line indicating better predictions. ")
-            f.write("The error distribution reveals the spread of prediction errors.\n")
-    
-    print(f"Generated results summary at {summary_path}")
-
-
 def main():
+    results_dir = Path("results")
+    solutions_dir = results_dir / "solutions"
+    costs_dir = Path("costs")
     figures_dir = Path("analysis/figures")
     figures_dir.mkdir(parents=True, exist_ok=True)
     
-    matches = find_matching_files()
+    job_csv = costs_dir / "jobSimple" / "job.csv"
+    stats_csv = costs_dir / "stats" / "statsCards6.csv"
     
-    if not matches:
-        print("No result files found in results/ directory")
-        return
+    baseline_job = load_baseline_data(job_csv)
+    baseline_stats = load_baseline_data(stats_csv)
     
-    print(f"Found {len(matches)} result file(s) to process")
+    solution_files = list(solutions_dir.glob("Paper_*.sl.csv"))
     
-    all_results = []
+    results_by_category = {
+        'JOB-light': {'rowFactor': [], 'rows': []},
+        'STATS': {'rowFactor': [], 'rows': []}
+    }
     
-    for train_file, sol_file, base_name in matches:
-        print(f"\nProcessing: {base_name}")
+    for sol_file in solution_files:
+        benchmark, value_type, layer_name = parse_filename_for_benchmark(sol_file.name)
+        
+        if not benchmark or not value_type or value_type not in ['rows', 'rowFactor']:
+            continue
         
         try:
-            parsed_info = parse_filename(base_name)
-            title = format_title(parsed_info)
+            df = pd.read_csv(sol_file)
             
-            train_data = load_training_log(train_file)
-            final_loss = train_data['loss'][-1] if len(train_data['loss']) > 0 else None
+            if value_type == 'rowFactor':
+                baseline_data = baseline_job if benchmark == 'JOB-light' else baseline_stats
+            else:
+                baseline_data = None
             
-            plot_a_path = figures_dir / f"{base_name}_training_curve.png"
-            plot_training_curve(
-                train_data['episode'],
-                train_data['loss'],
-                train_data['avg_loss'],
-                plot_a_path,
-                title_suffix=f" - {title}"
-            )
+            errors = get_error_from_solution(df, value_type, baseline_data)
             
-            result_info = {
-                'base_name': base_name,
-                'title': title,
-                'training_loss': final_loss,
-                'plot_training': plot_a_path
-            }
+            if len(errors) > 0:
+                mean_error = np.mean(errors)
+                
+                base_name = sol_file.stem.replace('.sl', '')
+                train_file = results_dir / f"{base_name}.csv"
+                
+                if train_file.exists():
+                    results_by_category[benchmark][value_type].append({
+                        'base_name': base_name,
+                        'layer': layer_name,
+                        'mean_error': mean_error,
+                        'sol_file': sol_file,
+                        'train_file': train_file
+                    })
+        except Exception as e:
+            print(f"Error processing {sol_file.name}: {e}")
+            continue
+    
+    categories_to_plot = [
+        ('JOB-light', 'rowFactor', 2, 'Correction'),
+        ('JOB-light', 'rows', 2, 'Estimation'),
+        ('STATS', 'rowFactor', 2, 'Correction'),
+        ('STATS', 'rows', 2, 'Estimation')
+    ]
+    
+    for benchmark, value_type, num_best, type_name in categories_to_plot:
+        results = results_by_category[benchmark][value_type]
+        results.sort(key=lambda x: x['mean_error'])
+        best_results = results[:num_best]
+        
+        print(f"\n{benchmark} {type_name} - Top {num_best}:")
+        for r in best_results:
+            print(f"  {r['layer']}: {r['mean_error']:.4f} error")
+        
+        for idx, result in enumerate(best_results):
+            base_name = result['base_name']
+            train_file = result['train_file']
+            sol_file = result['sol_file']
             
-            if sol_file is not None:
+            try:
+                train_data = load_training_log(train_file)
+                final_loss = train_data['loss'][-1] if len(train_data['loss']) > 0 else None
+                
+                layer = result['layer']
+                suffix = f" - {benchmark} {type_name} - {layer}"
+                
+                plot_a_path = figures_dir / f"{base_name}_training_curve.png"
+                plot_training_curve(
+                    train_data['episode'],
+                    train_data['loss'],
+                    train_data['avg_loss'],
+                    plot_a_path,
+                    title_suffix=suffix
+                )
+                
                 sol_data = load_solutions(sol_file)
                 plot_b_path = figures_dir / f"{base_name}_prediction_quality.png"
-                
-                mae = np.mean(sol_data['abs_error'])
-                rmse = np.sqrt(np.mean((sol_data['predicted'] - sol_data['true']) ** 2))
-                r2 = 1 - np.sum((sol_data['true'] - sol_data['predicted']) ** 2) / np.sum((sol_data['true'] - np.mean(sol_data['true'])) ** 2)
                 
                 plot_prediction_quality(
                     sol_data['true'],
@@ -352,31 +386,16 @@ def main():
                     sol_data['abs_error'],
                     sol_data['log_error'],
                     plot_b_path,
-                    title_suffix=f" - {title}"
+                    title_suffix=suffix
                 )
                 
-                result_info.update({
-                    'plot_prediction': plot_b_path,
-                    'mae': mae,
-                    'rmse': rmse,
-                    'r2': r2
-                })
-            else:
-                print(f"  Warning: No solution file found for {base_name}, skipping prediction quality plot")
-            
-            all_results.append(result_info)
-                
-        except Exception as e:
-            print(f"  Error processing {base_name}: {e}")
-            import traceback
-            traceback.print_exc()
-    
-    best_training, best_prediction = select_best_plots(all_results)
-    generate_results_summary(best_training, best_prediction, figures_dir)
+            except Exception as e:
+                print(f"  Error processing {base_name}: {e}")
+                import traceback
+                traceback.print_exc()
     
     print(f"\nDone! Plots saved to {figures_dir}/")
 
 
 if __name__ == "__main__":
     main()
-
