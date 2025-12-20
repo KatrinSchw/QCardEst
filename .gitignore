@@ -12,3 +12,10 @@ results/*.csv
 results/solutions/
 results/models/
 results/settings/
+
+*.aux
+*.log
+*.out
+*.fls
+*.fdb_latexmk
+*.synctex.gz

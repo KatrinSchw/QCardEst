@@ -1,0 +1,324 @@
+\documentclass{article}
+\usepackage[utf8]{inputenc}
+\usepackage{amsmath}
+\usepackage{listings}
+\usepackage{xcolor}
+\usepackage{booktabs}
+\usepackage{hyperref}
+
+\title{QCardEst/QCardCorr: Key Computation Functions Guide}
+\author{QCardEst/QCardCorr}
+\date{\today}
+
+\begin{document}
+
+\maketitle
+
+The difference between QCardEst and QCardCorr is controlled by the \texttt{valueType} setting:
+
+\begin{itemize}
+\item \textbf{QCardEst}: \texttt{valueType = "rows"} $\rightarrow$ Direct cardinality prediction
+\item \textbf{QCardCorr}: \texttt{valueType = "rowFactor"} $\rightarrow$ Correction factor prediction (multiplies existing prediction)
+\end{itemize}
+
+\section{Entry Point: Main Execution Flow}
+
+\textbf{File}: \texttt{runRegression.py}
+
+\textbf{Key Function}: Main execution
+
+\begin{lstlisting}[language=Python, basicstyle=\small\ttfamily]
+# Lines 49-65: Setup and execution
+env = CardEnv(inputFile=settings["data"] + ".csv", settings=settings)
+agent = interpretation.fromString(settings["loss"], None, env)
+model = vqc(settings=settings, nInputs=env.getInputSize(), nOutputs=agent.nInputs, norm=False)
+optimizer = Regression(agent, env, settings)
+optimizer.run()  # Main training loop
+optimizer.listSolutions()  # Generate final predictions
+\end{lstlisting}
+
+\textbf{Key Input}: \texttt{settings["valueType"]} determines Est vs Corr mode
+
+\section{Training Loop: Core Learning Process}
+
+\textbf{File}: \texttt{ML/GradientQML.py}
+
+\textbf{Key Function}: \texttt{GradientQML.run()} (lines 43-80)
+
+\textbf{Critical Computation Steps}:
+
+\begin{lstlisting}[language=Python, basicstyle=\small\ttfamily]
+# Line 55: Get training sample
+state, expected = self.env.step()
+
+# Line 56: Forward pass through quantum model
+prediction = self.agent(Tensor(state))
+
+# Line 57: Compute loss
+closs, logState = self.interpret(state, expected, prediction, logState)
+
+# Lines 63-65: Backward pass and optimization
+self.optimizer.zero_grad()
+loss.backward()
+self.optimizer.step()
+
+# Lines 72-74: Periodic evaluation and logging
+stats = self.env.elvaluateModel(self.agent)
+self.resultFile.write(",".join(str(e) for e in ([episode] + stats)))
+\end{lstlisting}
+
+\textbf{Key Input}: 
+\begin{itemize}
+\item \texttt{state}: Feature vector (query tables + selectivities)
+\item \texttt{expected}: Target value (computed based on \texttt{valueType})
+\end{itemize}
+
+\section{Expected Value Computation: Est vs Corr Difference}
+
+\textbf{File}: \texttt{cardEnv.py}
+
+\textbf{Key Function}: \texttt{CardEnv.expectedWithType()} (lines 34-39)
+
+\textbf{Critical Logic}:
+
+\begin{lstlisting}[language=Python, basicstyle=\small\ttfamily]
+def expectedWithType(self, entry, type):
+    if type in ["rowFactor", "rowsFactor"]:  # QCardCorr
+        return self.expectedMapping(entry["rows"] / entry["rowsPredicted"])
+    if type in ["costFactor", "costsFactor"]:
+        return self.expectedMapping(entry["cost"] / entry["costPredicted"])
+    return self.expectedMapping(entry[type])  # QCardEst: direct value
+
+def expectedMapping(self, value):
+    return math.log(value)  # Log-space transformation
+\end{lstlisting}
+
+\textbf{Key Difference}:
+\begin{itemize}
+\item \textbf{QCardEst} (\texttt{"rows"}): \texttt{expected = log(true\_cardinality)}
+\item \textbf{QCardCorr} (\texttt{"rowFactor"}): \texttt{expected = log(true\_cardinality / predicted\_cardinality)}
+\end{itemize}
+
+\section{Model Evaluation: Metrics Computation}
+
+\textbf{File}: \texttt{cardEnv.py}
+
+\textbf{Key Function}: \texttt{CardEnv.elvaluateModel()} (lines 87-139)
+
+\textbf{Critical Computation} (lines 108-135):
+
+\begin{lstlisting}[language=Python, basicstyle=\small\ttfamily]
+for i, prediction in enumerate(predictions):
+    entry = evaluationSet[i]
+    value = model.predict(prediction).item()  # Model output
+    expected = self.expected(entry)  # True value
+    
+    # Compute error metrics
+    diffs.append(abs(value - expected))
+    factors.append(compute_factor(value, expected))
+    
+    # Convert to cardinality space
+    if "Factor" in self.valueType:  # QCardCorr
+        correction = math.exp(value)
+        card = math.log(correction * entry["rowsPredicted"])
+    else:  # QCardEst
+        card = value
+    
+    expectedCard = math.log(entry["rows"])
+    diffCards.append(abs(card - expectedCard))
+    factorCards.append(compute_factor(card, expectedCard))
+
+# Return statistics: [mean_diff, median_diff, var_diff, mean_factor, ...]
+return [stat.mean(diffs), stat.median(diffs), ...]
+\end{lstlisting}
+
+\textbf{Key Output}: 13-element statistics array written to CSV (line 73 in GradientQML.py)
+
+\section{Final Predictions: Solution Generation}
+
+\textbf{File}: \texttt{cardEnv.py}
+
+\textbf{Key Function}: \texttt{CardEnv.listSolutions()} (lines 141-155)
+
+\textbf{Critical Computation}:
+
+\begin{lstlisting}[language=Python, basicstyle=\small\ttfamily]
+for index, entry in enumerate(self.data):
+    state = Tensor(entry["features"])
+    temp = model(state)  # Quantum model output
+    prediction = model.predict(temp)  # Post-processed prediction
+    expected = self.expected(entry)  # True value
+    loss = model.loss(temp, expected)  # Loss value
+    
+    # Compute factor (error metric)
+    factor = abs(prediction / expected)
+    if factor < 1 and factor != 0:
+        factor = 1 / factor
+    
+    result.append([index, prediction.item(), expected, factor.item(), loss.item()])
+\end{lstlisting}
+
+\textbf{Key Output}: CSV file with columns: \texttt{id, prediction, expected, factor, loss}
+
+\section{Quantum Model Architecture}
+
+\textbf{File}: \texttt{ML/models.py}
+
+\textbf{Key Function}: \texttt{vqc()} (lines 31-87)
+
+\textbf{Critical Components}:
+
+\begin{lstlisting}[language=Python, basicstyle=\small\ttfamily]
+# Lines 44-49: Create parameterized quantum circuit
+qc = circuits.parametrizedCircuit(nQubits, settings)
+X = list(qc.parameters)[:divider]  # Input parameters
+params = list(qc.parameters)[divider:]  # Trainable parameters
+
+# Lines 63-67: Connect quantum circuit to PyTorch
+qnn = CircuitQNN(qc, input_params=X, weight_params=params, quantum_instance=qi)
+quantumNN = TorchConnector(qnn, initialWeights)
+
+# Lines 70-85: Build complete model
+model = torch.nn.Sequential(
+    paddingLayer,      # Pad input to qubit count
+    quantumNN,          # Quantum neural network
+    ReshapeSumLayer,   # Reduce quantum states to outputs
+    NormLayer          # Normalize probabilities
+)
+\end{lstlisting}
+
+\textbf{Key Input}: \texttt{settings} dict with:
+\begin{itemize}
+\item \texttt{encoding}: \texttt{["rx", "rz"]} (feature encoding)
+\item \texttt{reps}: Number of layers
+\item \texttt{calc}: \texttt{"yz"} (measurement basis)
+\item \texttt{entangleType}: \texttt{"circular"} (entanglement pattern)
+\end{itemize}
+
+\section{Post-Processing: Interpretation Layers}
+
+\textbf{File}: \texttt{ML/regressionInterpretation.py}
+
+\textbf{Key Function}: \texttt{fromString()} (lines 244-274)
+
+\textbf{Available Interpretations}:
+\begin{itemize}
+\item \texttt{"linear"}: \texttt{LinearScale} - Single probability with scaling
+\item \texttt{"rational"}: \texttt{Rational} - Ratio of two probabilities
+\item \texttt{"rationalLog"}: \texttt{RationalLog} - Log of ratio
+\item \texttt{"threshold"}: \texttt{SecondValueThreshold} - Threshold-controlled
+\item \texttt{"PlaceValue"}: \texttt{PlaceValueSystem} - Place-value encoding
+\end{itemize}
+
+\textbf{Key Function}: \texttt{Interpretation.predict()} (line 32)
+
+\begin{lstlisting}[language=Python, basicstyle=\small\ttfamily]
+def predict(self, prediction: torch.Tensor):
+    """Convert quantum output to scalar prediction"""
+    return prediction
+\end{lstlisting}
+
+\textbf{Key Function}: \texttt{Interpretation.loss()} (line 38)
+
+\begin{lstlisting}[language=Python, basicstyle=\small\ttfamily]
+def loss(self, prediction: torch.Tensor, compare):
+    """MSE loss for optimization"""
+    return (self.predict(prediction) - compare)**2
+\end{lstlisting}
+
+\section{Data Loading and Feature Extraction}
+
+\textbf{File}: \texttt{cardEnv.py}
+
+\textbf{Key Function}: \texttt{CardEnv.load\_data()} (lines 47-78)
+
+\textbf{Data Format} (from \texttt{costs/*.csv}):
+\begin{enumerate}
+\item Tablenames (separated by ';')
+\item Selectivities (separated by ';')
+\item PostgreSQL cost
+\item PostgreSQL/MSCN cardinality prediction
+\item Actual execution time
+\item True cardinality
+\end{enumerate}
+
+\textbf{Key Processing}:
+
+\begin{lstlisting}[language=Python, basicstyle=\small\ttfamily]
+# Lines 56-67: Extract features
+query = tmp[0].split(";")
+selectivities = tmp[1].split(";")
+features = [[table_index, selectivity] for table, sel in zip(query, selectivities)]
+
+# Line 76: Create data entry
+datapoint = {
+    "id": id,
+    "features_raw": features,
+    "features": self.feature_map(features),  # Map to [0, π]
+    "rows": int(values[3]),  # True cardinality
+    "rowsPredicted": int(values[1]),  # Classical prediction
+    "cost": float(values[2]),
+    "costPredicted": float(values[0])
+}
+\end{lstlisting}
+
+\section{Result File Format}
+
+\textbf{Training Logs}: \texttt{results/*.csv}
+
+\textbf{Format}: \texttt{episode, mean\_diff, median\_diff, var\_diff, mean\_factor, median\_factor, var\_factor, mean\_diffCards, median\_diffCards, var\_diffCards, mean\_factorCards, median\_factorCards, var\_factorCards, close}
+
+\textbf{Generated by}: \texttt{GradientQML.run()} line 73
+
+\textbf{Solutions}: \texttt{results/solutions/*.sl.csv}
+
+\textbf{Format}: \texttt{id, prediction, expected, factor, loss}
+
+\textbf{Generated by}: \texttt{CardEnv.listSolutions()} line 154
+
+\section{Summary: Key Files for Results Computation}
+
+\begin{enumerate}
+\item \textbf{\texttt{runRegression.py}}: Entry point, settings configuration
+\item \textbf{\texttt{ML/GradientQML.py}}: Training loop, optimization, result logging
+\item \textbf{\texttt{cardEnv.py}}: 
+\begin{itemize}
+\item \texttt{expectedWithType()}: Est vs Corr difference
+\item \texttt{elvaluateModel()}: Metrics computation
+\item \texttt{listSolutions()}: Final predictions
+\end{itemize}
+\item \textbf{\texttt{ML/models.py}}: Quantum model architecture (\texttt{vqc()})
+\item \textbf{\texttt{ML/regressionInterpretation.py}}: Post-processing layers
+\item \textbf{\texttt{cardEnv.py} (load\_data)}: Data loading and feature extraction
+\end{enumerate}
+
+\section{Key Differences: QCardEst vs QCardCorr}
+
+\begin{table}[h]
+\centering
+\begin{tabular}{lcc}
+\toprule
+Aspect & QCardEst (\texttt{valueType="rows"}) & QCardCorr (\texttt{valueType="rowFactor"}) \\
+\midrule
+\textbf{Expected Value} & \texttt{log(true\_cardinality)} & \texttt{log(true\_cardinality / predicted\_cardinality)} \\
+\textbf{Model Output} & Direct cardinality in log space & Correction factor in log space \\
+\textbf{Final Cardinality} & \texttt{exp(prediction)} & \texttt{exp(prediction) * predicted\_cardinality} \\
+\textbf{Use Case} & Predict from scratch & Correct existing predictions \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\section{For Presentations}
+
+\textbf{Most Important Functions to Highlight}:
+
+\begin{enumerate}
+\item \textbf{\texttt{cardEnv.py:expectedWithType()}} - Shows the Est/Corr difference
+\item \textbf{\texttt{ML/GradientQML.py:run()}} - Shows the training loop
+\item \textbf{\texttt{cardEnv.py:elvaluateModel()}} - Shows how metrics are computed
+\item \textbf{\texttt{ML/models.py:vqc()}} - Shows quantum model architecture
+\item \textbf{\texttt{cardEnv.py:listSolutions()}} - Shows final prediction generation
+\end{enumerate}
+
+\end{document}
+

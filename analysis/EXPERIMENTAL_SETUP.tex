@@ -1,0 +1,354 @@
+\documentclass{article}
+\usepackage[utf8]{inputenc}
+\usepackage{amsmath}
+\usepackage{listings}
+\usepackage{xcolor}
+\usepackage{booktabs}
+\usepackage{hyperref}
+
+\title{Experimental Setup: Where Parameters Are Defined}
+\author{QCardEst/QCardCorr}
+\date{\today}
+
+\begin{document}
+
+\maketitle
+
+This document shows exactly where each experimental setup parameter is defined in the codebase.
+
+\section{Overview}
+
+The experimental setup parameters are configured in the \textbf{\texttt{settings} dictionary} in \texttt{runRegression.py}, which can be:
+\begin{enumerate}
+\item \textbf{Set directly} in the file (lines 14-36)
+\item \textbf{Overridden via command line} (lines 38-40)
+\item \textbf{Automatically determined} from data (for some parameters)
+\end{enumerate}
+
+\section{Query Characteristics: Up to 6 Joined Tables}
+
+\subsection{Where Defined:}
+\begin{itemize}
+\item \textbf{Primary}: \texttt{cardEnv.py}, line 50
+\item \textbf{Source}: Automatically extracted from data file
+\end{itemize}
+
+\begin{lstlisting}[language=Python, basicstyle=\small\ttfamily]
+# cardEnv.py, line 48-50
+queryInfo = extractTablesFromCardsCSVfile(file)
+self.setMaxId(queryInfo["nTables"] - 1)
+self.numFeatures = queryInfo["maxQuerySize"]  # ← Up to 6 tables
+\end{lstlisting}
+
+\textbf{Data Source}: 
+\begin{itemize}
+\item \texttt{costs/stats/statsCards6.csv} $\rightarrow$ max 6 tables
+\item \texttt{costs/stats/stats4.csv} $\rightarrow$ exactly 4 tables
+\item \texttt{costs/jobSimple/job.csv} $\rightarrow$ variable
+\end{itemize}
+
+\textbf{Manual Override}:
+\begin{itemize}
+\item \texttt{runRegression.py}, line 35: \texttt{"numFeatures": 6} (can be set manually)
+\end{itemize}
+
+\section{Quantum Model: 6 Qubits}
+
+\subsection{Where Defined:}
+\begin{itemize}
+\item \textbf{Primary}: \texttt{ML/models.py}, lines 39-41
+\item \textbf{Calculation}: \texttt{nQubits = max(nInputs, nQubitsOut)}
+\end{itemize}
+
+\begin{lstlisting}[language=Python, basicstyle=\small\ttfamily]
+# ML/models.py, lines 39-41
+nQubitsOut = math.ceil(math.log2(nOutputs))  # Output qubits needed
+nQubits = max(nInputs, nQubitsOut)  # ← 6 qubits (from numFeatures=6)
+\end{lstlisting}
+
+\textbf{Determined by}:
+\begin{itemize}
+\item \texttt{nInputs} = \texttt{env.getInputSize()} = \texttt{numFeatures} = 6
+\item \texttt{nOutputs} = \texttt{agent.nInputs} (depends on interpretation layer, typically 2)
+\end{itemize}
+
+\textbf{Result}: With \texttt{numFeatures=6} and typical \texttt{nOutputs=2}, we get \texttt{nQubits = max(6, 1) = 6}
+
+\section{VQC Layers: 16 Layers}
+
+\subsection{Where Defined:}
+\begin{itemize}
+\item \textbf{Primary}: \texttt{runRegression.py}, line 18 (default: 6, but overridden to 16)
+\item \textbf{Used in}: \texttt{ML/circuits.py}, line 86
+\end{itemize}
+
+\begin{lstlisting}[language=Python, basicstyle=\small\ttfamily]
+# runRegression.py, line 18
+settings = {
+    "reps": 6,  # Default, but typically overridden to 16
+    ...
+}
+
+# ML/circuits.py, line 86
+processing = variationalLayers(nQubits, vqcConf, maxLayers=vqcConf.reps)  # ← reps=16
+\end{lstlisting}
+
+\textbf{How to Set}:
+
+\begin{lstlisting}[language=bash, basicstyle=\small\ttfamily]
+# Via command line
+python runRegression.py '{"reps": 16}'
+
+# Or in runRegression.py directly
+settings = {"reps": 16, ...}
+\end{lstlisting}
+
+\textbf{Where Used}:
+\begin{itemize}
+\item \texttt{ML/circuits.py:parametrizedCircuit()} $\rightarrow$ Creates 16 variational layers
+\item Each layer contains: encoding gates (rx, rz) + entangling gates (cx)
+\end{itemize}
+
+\section{Gates Configuration}
+
+\subsection{Where Defined:}
+\begin{itemize}
+\item \textbf{Primary}: \texttt{runRegression.py}, lines 16, 20-21
+\item \textbf{Processed in}: \texttt{ML/circuits.py}, lines 24-36
+\end{itemize}
+
+\subsection{Encoding Gates: \texttt{["rx", "rz"]}}
+
+\begin{lstlisting}[language=Python, basicstyle=\small\ttfamily]
+# runRegression.py, line 16
+settings = {
+    "encoding": ["rx", "rz"],  # ← Encoding gates
+    ...
+}
+\end{lstlisting}
+
+\textbf{Used in}: \texttt{ML/circuits.py:encodingCircuit()} (line 39)
+\begin{itemize}
+\item Creates rotation gates: \texttt{qc.rx()} and \texttt{qc.rz()} for each qubit
+\end{itemize}
+
+\subsection{Entangling Gates: \texttt{"cx"} (CNOT)}
+
+\begin{lstlisting}[language=Python, basicstyle=\small\ttfamily]
+# runRegression.py, line 21
+settings = {
+    "entangle": "cx",  # ← Entangling gate type
+    ...
+}
+\end{lstlisting}
+
+\textbf{Used in}: \texttt{ML/circuits.py:variationalLayers()} (lines 115-118)
+
+\begin{lstlisting}[language=Python, basicstyle=\small\ttfamily]
+# Circular entanglement pattern
+qc.cx(nQubits - 1, 0)  # Last to first
+for qubit in range(nQubits - 1):
+    qc.cx(qubit, qubit + 1)  # Circular chain
+\end{lstlisting}
+
+\subsection{Entanglement Type: \texttt{"circular"}}
+
+\begin{lstlisting}[language=Python, basicstyle=\small\ttfamily]
+# runRegression.py, line 20
+settings = {
+    "entangleType": "circular",  # ← Entanglement pattern
+    ...
+}
+\end{lstlisting}
+
+\subsection{Measurement Basis: \texttt{"yz"}}
+
+\begin{lstlisting}[language=Python, basicstyle=\small\ttfamily]
+# runRegression.py, line 19
+settings = {
+    "calc": "yz",  # ← Measurement basis (Y and Z Pauli measurements)
+    ...
+}
+\end{lstlisting}
+
+\textbf{Processed in}: \texttt{ML/circuits.py:VQCsettings.\_\_init\_\_()} (line 31)
+
+\begin{lstlisting}[language=Python, basicstyle=\small\ttfamily]
+self.calcGates = stringToCircuitList(settings["calc"])  # ["y", "z"]
+\end{lstlisting}
+
+\section{Training: 8000 Optimization Episodes}
+
+\subsection{Where Defined:}
+\begin{itemize}
+\item \textbf{Primary}: \texttt{runRegression.py}, line 23 (default: 1, but overridden to 8000)
+\item \textbf{Used in}: \texttt{ML/GradientQML.py}, line 50
+\end{itemize}
+
+\begin{lstlisting}[language=Python, basicstyle=\small\ttfamily]
+# runRegression.py, line 23
+settings = {
+    "numEpisodes": 1,  # Default, but typically overridden to 8000
+    ...
+}
+
+# ML/GradientQML.py, line 50
+for episode in range(self.numEpisodes):  # ← 8000 episodes
+    ...
+\end{lstlisting}
+
+\textbf{How to Set}:
+
+\begin{lstlisting}[language=bash, basicstyle=\small\ttfamily]
+# Via command line
+python runRegression.py '{"numEpisodes": 8000}'
+
+# Or in runRegression.py directly
+settings = {"numEpisodes": 8000, ...}
+\end{lstlisting}
+
+\textbf{Where Used}:
+\begin{itemize}
+\item \texttt{ML/GradientQML.py:run()} $\rightarrow$ Main training loop (lines 50-75)
+\item Each episode: forward pass, loss computation, backward pass, optimization step
+\end{itemize}
+
+\section{Optimizer: Adam with Learning Rate Decay}
+
+\subsection{Where Defined:}
+\begin{itemize}
+\item \textbf{Primary}: \texttt{runRegression.py}, lines 24-25
+\item \textbf{Configured in}: \texttt{ML/GradientQML.py}, lines 22-38
+\end{itemize}
+
+\subsection{Optimizer Type: \texttt{"Adam"}}
+
+\begin{lstlisting}[language=Python, basicstyle=\small\ttfamily]
+# runRegression.py, line 24
+settings = {
+    "optimizer": "Adam",  # ← Optimizer type
+    ...
+}
+\end{lstlisting}
+
+\textbf{Configured in}: \texttt{ML/GradientQML.py}, lines 28-29
+
+\begin{lstlisting}[language=Python, basicstyle=\small\ttfamily]
+if self.settings["optimizer"].lower() == "adam":
+    self.optimizer = Adam(self.agent.model.parameters(), lr=lr, amsgrad=True)
+\end{lstlisting}
+
+\subsection{Learning Rate Decay: \texttt{[0.01, 100, 0.9]}}
+
+\begin{lstlisting}[language=Python, basicstyle=\small\ttfamily]
+# runRegression.py, line 25
+settings = {
+    "lr": [0.01, 100, 0.9],  # ← [initial_lr, step_size, gamma]
+    ...
+}
+\end{lstlisting}
+
+\textbf{Interpretation}:
+\begin{itemize}
+\item \texttt{0.01}: Initial learning rate
+\item \texttt{100}: Decay every 100 episodes
+\item \texttt{0.9}: Multiply LR by 0.9 at each decay step
+\end{itemize}
+
+\textbf{Configured in}: \texttt{ML/GradientQML.py}, lines 35-36
+
+\begin{lstlisting}[language=Python, basicstyle=\small\ttfamily]
+if isinstance(lrSettings, list):
+    self.scheduler = StepLR(self.optimizer, step_size=lrSettings[1], gamma=lrSettings[2])
+    # StepLR(optimizer, step_size=100, gamma=0.9)
+\end{lstlisting}
+
+\textbf{Applied in}: \texttt{ML/GradientQML.py}, line 66
+
+\begin{lstlisting}[language=Python, basicstyle=\small\ttfamily]
+self.scheduler.step()  # Decay learning rate every episode
+\end{lstlisting}
+
+\section{Complete Settings Dictionary Example}
+
+For the experimental setup you described, the settings would be:
+
+\begin{lstlisting}[language=Python, basicstyle=\small\ttfamily]
+# runRegression.py
+settings = {
+    "features": "simple",
+    "encoding": ["rx", "rz"],        # Encoding gates
+    "reuploading": False,
+    "reps": 16,                      # ← 16 VQC layers
+    "calc": "yz",                    # Measurement basis
+    "entangleType": "circular",      # Entanglement pattern
+    "entangle": "cx",                # Entangling gate
+    "reward": "rational",
+    "numEpisodes": 8000,             # ← 8000 episodes
+    "optimizer": "Adam",             # ← Adam optimizer
+    "lr": [0.01, 100, 0.9],         # ← LR decay: start=0.01, step=100, gamma=0.9
+    "prefix": "Paper",
+    "noise": 0,
+    "seed": 42,
+    "batchsize": 1,
+    "loss": "linear",                # or "rational", "threshold", etc.
+    "data": "stats/statsCards6",     # ← Up to 6 tables
+    "valueType": "rows",             # or "rowFactor" for QCardCorr
+    "numFeatures": 6                 # ← 6 qubits (can be auto-detected)
+}
+\end{lstlisting}
+
+\section{Summary: File Locations}
+
+\begin{table}[h]
+\centering
+\begin{tabular}{lcc}
+\toprule
+Parameter & Location & Line(s) \\
+\midrule
+\textbf{Up to 6 tables} & \texttt{cardEnv.py} & 50 (auto from data) \\
+\textbf{6 qubits} & \texttt{ML/models.py} & 39-41 (calculated) \\
+\textbf{16 VQC layers} & \texttt{runRegression.py} & 18 (\texttt{reps}) \\
+\textbf{Gates (rx, rz, cx)} & \texttt{runRegression.py} & 16, 20-21 \\
+\textbf{8000 episodes} & \texttt{runRegression.py} & 23 (\texttt{numEpisodes}) \\
+\textbf{Adam optimizer} & \texttt{runRegression.py} & 24 (\texttt{optimizer}) \\
+\textbf{LR decay} & \texttt{runRegression.py} & 25 (\texttt{lr}) \\
+\textbf{LR scheduler} & \texttt{ML/GradientQML.py} & 35-36 (configured) \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\section{How to Run with These Settings}
+
+\begin{lstlisting}[language=bash, basicstyle=\small\ttfamily]
+# Command line (recommended for experiments)
+python runRegression.py '{
+    "reps": 16,
+    "numEpisodes": 8000,
+    "optimizer": "Adam",
+    "lr": [0.01, 100, 0.9],
+    "data": "stats/statsCards6",
+    "numFeatures": 6,
+    "prefix": "Paper"
+}'
+\end{lstlisting}
+
+Or modify \texttt{runRegression.py} directly (lines 14-36).
+
+\section{Where Settings Are Saved}
+
+After running, the complete settings are saved to:
+\begin{itemize}
+\item \textbf{\texttt{results/settings/*.conf}} - Human-readable settings file
+\item \textbf{Filename contains all settings} - See \texttt{ML/QML.py}, lines 34-36
+\end{itemize}
+
+Example filename:
+\begin{verbatim}
+Paper_simple_['rx',-'rz']_False_16_yz_circular_cx_rational_8000_Adam_[0.01,-100,-0.9]_Test_42_0_1_linear_stats-statsCards6_rows_6
+\end{verbatim}
+
+This filename encodes all settings, making it easy to identify the experimental configuration.
+
+\end{document}
+
