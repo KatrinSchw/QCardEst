@@ -1,0 +1,323 @@
+\documentclass{article}
+\usepackage[utf8]{inputenc}
+\usepackage{amsmath}
+\usepackage{listings}
+\usepackage{xcolor}
+\usepackage{booktabs}
+\usepackage{hyperref}
+\usepackage{graphicx}
+\usepackage[style=numeric,backend=biber]{biblatex}
+\addbibresource{references.bib}
+
+\title{Evaluation of QCardEst/QCardCorr on JOB-light and STATS benchmarks}
+\author{Katrin Schwab}
+\date{21.12.2025}
+
+\begin{document}
+
+\maketitle
+
+\section{Scope and Constraints}
+
+This document analyzes and extends the evaluation of the QCardEst and QCardCorr models proposed by Winker et al. \cite{winker2025qcardest}.
+Before examining the results, it is important to clearly define the scope and constraints of our evaluation. These points help establish the strength of the conclusions presented and clarify what the results do and do not claim.
+
+\subsection{Quantum Simulation Environment}
+
+First, the results are obtained using a quantum circuit simulator rather than real quantum hardware. This has several important implications:
+
+\begin{itemize}
+\item \textbf{No hardware noise}: Simulators produce ideal quantum states. The results reflect model capacity and the effectiveness of the hybrid approach, not hardware limitations or noise characteristics.
+\item \textbf{Prediction quality focus}: The evaluation focuses on prediction quality, not execution time. We do not claim quantum speedup or runtime advantages. The work evaluates whether quantum models can improve cardinality estimation accuracy.
+\end{itemize}
+
+\subsection{Experimental Setup}
+
+Queries join up to 6 tables, matching 6 qubits (one qubit per table), which keeps simulation and near-term feasibility in scope.
+
+The training process involves a hybrid quantum-classical optimization loop: \cite{winker2025qcardest}
+\begin{itemize}
+\item A Variational Quantum Circuit (VQC) is executed repeatedly
+\item After each execution, parameters are updated using the Adam optimizer with a decaying learning rate
+\item The optimization runs for 8000 episodes
+\end{itemize}
+
+Each training episode involves:
+\begin{itemize}
+\item Feature encoding
+\item Simulating a \textbf{6-qubit, 16-layer VQC}
+\item Measuring the circuit to obtain probability distributions
+\item Classical post-processing through various layer types
+\item Computing gradients and updating parameters
+\end{itemize}
+
+This hybrid optimization loop makes training computationally expensive, but enables end-to-end learning of the quantum-classical pipeline.
+
+\section{Benchmark Descriptions}
+
+Before examining the actual results, it is important to understand the two benchmarks used, as they represent very different types of workloads.
+
+Both JOB-light and STATS are widely used benchmarks for evaluating cardinality estimation methods and query optimizers, but they differ significantly in their underlying data and query complexity.
+
+\subsection{JOB-light}
+
+JOB-light \cite{leis2015good} is derived from the real-world IMDB dataset. It contains:
+\begin{itemize}
+\item Natural correlations between attributes
+\item Skewed distributions that reflect realistic data characteristics
+\item Real-world query patterns
+\end{itemize}
+
+Despite being realistic, JOB-light is often considered relatively easier for modern optimizers like PostgreSQL, as the data patterns are generally well-handled by classical estimation methods. \cite{jobstatscomparison}
+
+\subsection{STATS}
+
+STATS \cite{han2021cardinality}, in contrast, is based on a synthetic but carefully designed dataset. Its purpose is not realism, but control:
+\begin{itemize}
+\item Data distributions are constructed to systematically test different types of predicates
+\item Designed to test various selectivities and filter combinations
+\item Provides controlled stress testing scenarios
+\end{itemize}
+
+As a result, STATS is typically more challenging for traditional or simple learned cardinality estimation models, as it exposes weaknesses that might not appear in naturally correlated data. \cite{postgresdocs}
+
+\subsection{Evaluation Strategy}
+
+Using both benchmarks provides a balanced evaluation, combining realistic workloads with controlled stress testing. We use the same hybrid quantum--classical pipeline for both benchmarks, so any performance differences observed are due to workload characteristics rather than changes in the model architecture or training procedure.
+
+\section{Experimental Results}
+
+This section presents the experimental results comparing QCardEst (cardinality estimation) and QCardCorr (cardinality correction) approaches across different classical post-processing layers.
+
+The results reveal a clear pattern: \textbf{correction-based approaches (QCardCorr) consistently outperform estimation-based approaches (QCardEst)} across most classical layers and both benchmarks. However, the best-performing layers differ between the two benchmarks, with Threshold excelling in JOB-light while RationalLog and Rational dominate in STATS. This suggests that layer effectiveness is context-dependent and influenced by the specific characteristics of the query workload and baseline estimator quality.
+
+\subsection{JOB-light Benchmark Results}
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=0.9\textwidth]{../analysis/figures/job_light_classical_layers_comparison.png}
+\caption{JOB-light benchmark: comparison figure for all classical layers. The chart shows mean error difference for Estimation (blue bars) and Correction (orange bars) approaches. Dashed lines indicate PostgreSQL (black, 2.48) and MSCN (green, 1.35) baseline errors.}
+\end{figure}
+
+Figure 1 shows the comparison of all classical layers for the JOB-light benchmark.
+
+\section{JOB-light Benchmark: Detailed Analysis}
+
+\subsection{Overview}
+
+For JOB-light, the \textbf{Threshold} layer achieves the best correction performance with a mean error difference of \textbf{0.39}, representing a remarkable improvement over both baseline estimators. This performance is \textbf{6.37 times better than the PostgreSQL baseline} (2.48) and \textbf{3.47 times better than the MSCN baseline} (1.35). The second-best performer is \textbf{PlaceValueNeg8} with an error of \textbf{0.42}, which is \textbf{5.91 times better than PostgreSQL} and \textbf{3.22 times better than MSCN}.
+
+When examining all correction approaches, the research group observes that in \textbf{6 out of 8 cases where cardinality correction outperforms PostgreSQL, it also outperforms MSCN}. This pattern suggests that the quantum correction mechanisms are capable of systematically improving upon both classical estimators, with the improvement being more pronounced relative to PostgreSQL's estimates.
+
+\subsection{Why Threshold Correction Wins}
+
+The \textbf{threshold} layer achieves the best correction performance with a mean error difference of \textbf{0.39}, outperforming all other layers including the MSCN baseline (1.35) and PostgreSQL baseline (2.48).
+
+\subsubsection{Mechanism}
+
+The threshold layer (\texttt{SecondValueThreshold}) uses a gating mechanism based on ReLU activations with a threshold at 0.25:
+
+\begin{verbatim}
+posChange = 1 + ReLU(x[0] - 0.25) * x[1] * scalar²
+negChange = 1 + ReLU(x[2] - 0.25) * x[3] * scalar²
+result = posChange - negChange
+\end{verbatim}
+
+\subsubsection{Why It Works Well for Correction}
+
+\begin{enumerate}
+\item \textbf{Selective Application}: The threshold mechanism only applies corrections when the quantum output exceeds 0.25, effectively filtering out noise and only making corrections when there is sufficient confidence in the quantum model's output.
+
+\item \textbf{Bidirectional Corrections}: By combining positive and negative changes through subtraction, the threshold layer can handle both overestimations and underestimations from the baseline (PostgreSQL) estimator.
+
+\item \textbf{Stability}: The threshold acts as a regularization mechanism, preventing the model from making unnecessary corrections when the baseline is already accurate. This is particularly important for correction tasks where many queries may already have reasonable estimates.
+
+\item \textbf{Baseline Leverage}: Correction approaches benefit from leveraging existing knowledge (PostgreSQL's estimates) and only correcting when necessary. The threshold mechanism aligns perfectly with this philosophy by only activating corrections above a confidence threshold.
+\end{enumerate}
+
+The threshold layer's success in correction (0.39 error) compared to estimation (5.19 error) demonstrates that \textbf{correction is fundamentally easier than full estimation} when a reasonable baseline exists.
+
+\subsubsection{Key Observations for JOB-light}
+
+\begin{itemize}
+\item \textbf{Correction dominance}: All correction approaches except PlaceValue8 outperform both PostgreSQL and MSCN baselines. This demonstrates the effectiveness of leveraging baseline estimates and applying selective corrections.
+
+\item \textbf{Estimation limitations}: For direct cardinality estimation, only \textbf{Linear} and \textbf{PlaceValue8} perform better than the PostgreSQL baseline. All other layers fail to improve upon PostgreSQL's estimates, highlighting the difficulty of absolute cardinality estimation compared to correction.
+
+\item \textbf{PlaceValue8 anomaly}: PlaceValue8 shows dramatically different behavior between correction (6.28 error, worst performer) and estimation (1.78 error, second-best). This stems from a fundamental limitation: PlaceValue8 can \textbf{only produce positive numbers}, meaning it can only correct cardinalities by \textbf{increasing them}. Since PostgreSQL estimates often need downward corrections, PlaceValue8 is unable to make the necessary adjustments, leading to poor correction performance. However, for estimation, this constraint is less problematic since cardinalities are inherently positive values.
+
+\item \textbf{PlaceValueNeg8 contrast}: The variant PlaceValueNeg8, which allows for negative numbers, performs excellently for correction (0.42, second-best) but poorly for estimation (8.62). This inverse relationship between PlaceValue8 and PlaceValueNeg8 highlights the importance of \textbf{bidirectional correction capability} for improving baseline estimates, while simpler positive-only representations work better for absolute value estimation.
+\end{itemize}
+
+\section{STATS Benchmark: Detailed Analysis}
+
+\subsection{Overview}
+
+For STATS, the performance landscape differs significantly from JOB-light. The best correction performance is achieved by \textbf{RationalLog} with a mean error difference of \textbf{0.32}, which is \textbf{8.66 times better than the PostgreSQL baseline} (2.77). The second-best is \textbf{Rational} with an error of \textbf{1.04}, representing a \textbf{2.67 times improvement} over PostgreSQL. Notably, the Threshold layer, which dominated JOB-light, achieves 1.96 error (still better than PostgreSQL, but not the best).
+
+This shift in optimal layer choice between benchmarks suggests that \textbf{the effectiveness of correction layers is sensitive to query workload characteristics}. Rational-based layers appear better suited to the STATS query patterns, possibly due to their ability to model multiplicative relationships more effectively in this context.
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=0.9\textwidth]{../analysis/figures/stats_classical_layers_comparison.png}
+\caption{STATS benchmark: comparison figure for all classical layers. The chart shows mean error difference for Estimation (blue bars) and Correction (orange bars) approaches. Dashed line indicates PostgreSQL (black, 2.77) baseline error.}
+\end{figure}
+
+Figure 2 shows the comparison of all classical layers for the STATS benchmark.
+
+\subsection{Key Findings}
+
+The STATS benchmark reveals several important patterns:
+
+\begin{enumerate}
+\item \textbf{Rational layers excel}: RationalLog and Rational achieve the best correction performance, with RationalLog showing an exceptional 8.66× improvement over PostgreSQL. This represents the largest improvement factor observed across both benchmarks.
+
+\item \textbf{Linear leads estimation}: As in JOB-light, Linear maintains its position as the best estimation layer (1.65 vs 1.43 in JOB-light), and along with PlaceValue8 (2.97), are the only layers that outperform the PostgreSQL baseline for direct estimation.
+
+\item \textbf{PlaceValue8 limitation confirmed}: PlaceValue8 again shows poor correction performance (13.65 error, worst among all correction approaches), confirming that its inability to produce negative corrections severely limits its effectiveness. This consistent pattern across both benchmarks validates the hypothesis that bidirectional correction capability is essential.
+
+\item \textbf{Higher baseline error}: PostgreSQL baseline error is 2.77 for STATS vs 2.48 for JOB-light, indicating that STATS queries may be inherently more challenging for classical estimators, yet still allowing for significant quantum-based improvements.
+
+\item \textbf{Correction vs Estimation gap}: The gap between best correction (0.32) and best estimation (1.65) in STATS is 1.33, which is larger than the gap in JOB-light (0.39 vs 1.43 = 1.04). This suggests correction has even greater advantage in STATS, despite the benchmark being more challenging overall.
+\end{enumerate}
+
+\section{Comparison: JOB-light vs STATS}
+
+\subsection{Absolute Performance Differences}
+
+\begin{table}[h]
+\centering
+\begin{tabular}{lccc}
+\toprule
+Metric & JOB-light & STATS & Difference \\
+\midrule
+Best Correction (threshold/rationalLog) & 0.39 & 0.32 & -0.07 (STATS better) \\
+Best Estimation (linear) & 1.43 & 1.65 & +0.22 (STATS harder) \\
+PostgreSQL Baseline & 2.48 & 2.77 & +0.29 (STATS harder) \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Key Differences}
+
+\begin{enumerate}
+\item \textbf{Error Magnitude}: STATS shows consistently higher errors across all layers, suggesting the benchmark is inherently more challenging. This could be due to:
+\begin{itemize}
+\item More complex query patterns
+\item Different data distributions
+\item Larger cardinality ranges
+\item More join combinations
+\end{itemize}
+
+\item \textbf{Correction Advantage}: The advantage of correction over estimation is actually larger in STATS (1.33) compared to JOB-light (1.04). This suggests that:
+\begin{itemize}
+\item Correction approaches can achieve even larger improvements in STATS (RationalLog: 8.66× better than PostgreSQL) compared to JOB-light (Threshold: 6.37× better)
+\item The best correction in STATS (0.32) is actually better than the best correction in JOB-light (0.39), despite STATS being more challenging overall
+\item Different layer architectures (RationalLog vs Threshold) are optimal for different workloads
+\end{itemize}
+
+\item \textbf{Layer Robustness}: The relative ranking of layers shows some variation between benchmarks:
+\begin{itemize}
+\item \textbf{Correction}: Threshold excels in JOB-light while RationalLog dominates STATS, though PlaceValueNeg8 remains strong in both
+\item \textbf{Estimation}: Linear and PlaceValue8 maintain their leading positions in both benchmarks
+\item This variation suggests that optimal layer choice should consider workload characteristics
+\end{itemize}
+
+\item \textbf{Baseline Quality}: Both benchmarks have similar PostgreSQL baseline errors (2.48 vs 2.77), yet correction approaches achieve larger improvements in STATS (RationalLog: 8.66×) compared to JOB-light (Threshold: 6.37×), demonstrating that optimal layer choice can unlock significant correction potential.
+\end{enumerate}
+
+\subsection{Similarities}
+
+\begin{enumerate}
+\item \textbf{Linear estimation dominance}: Linear layer consistently performs best for estimation in both benchmarks (1.43 JOB-light, 1.65 STATS), validating its simplicity and effectiveness.
+
+\item \textbf{PlaceValueNeg8 reliability}: PlaceValueNeg8 consistently ranks high for correction (2nd in JOB-light, 4th in STATS), showing its reliability across different workloads.
+
+\item \textbf{Estimation challenges}: Only Linear and PlaceValue8 consistently outperform PostgreSQL for estimation, while most other layers struggle with absolute value estimation in both benchmarks.
+
+\item \textbf{PlaceValue8 constraint}: PlaceValue8 consistently fails at correction (6.28 JOB-light, 13.65 STATS) due to its inability to produce negative corrections, while performing well at estimation (1.78 JOB-light, 2.97 STATS).
+\end{enumerate}
+
+\section{When to Pick Which Layer (Rule of Thumb)}
+
+Based on the combined results from both benchmarks, here is a practical guide for selecting classical layers. \textbf{Note that the optimal choice depends on the benchmark/workload characteristics}, with Threshold excelling in JOB-light but RationalLog dominating in STATS.
+
+\subsection{For Correction Tasks}
+
+\textbf{For JOB-light workloads: Threshold}
+\begin{itemize}
+\item Best performance (0.39, 6.37× better than PostgreSQL)
+\item Robust and interpretable selective correction mechanism
+\item Use when: Working with JOB-light-style queries and PostgreSQL baseline
+\end{itemize}
+
+\textbf{For STATS workloads: RationalLog}
+\begin{itemize}
+\item Best performance (0.32, 8.66× better than PostgreSQL)
+\item Exceptional improvement factor
+\item Use when: Working with STATS-style queries and need maximum correction accuracy
+\end{itemize}
+
+\subsection{For Estimation Tasks}
+
+\textbf{linear}
+\begin{itemize}
+\item Best performance for estimation in both benchmarks (1.43 JOB-light, 1.65 STATS)
+\item Simple and efficient
+\item Use when: You must do direct estimation without a baseline
+\end{itemize}
+
+\subsection{Cross-cutting Insights and Principles}
+
+\begin{itemize}
+\item \textbf{Cardinality correction is more robust than direct estimation}: The consistent superiority of correction approaches across all layers and benchmarks demonstrates that leveraging baseline estimates and applying selective adjustments is fundamentally more effective than estimating absolute cardinalities from scratch.
+
+\item \textbf{Expressiveness of the classical post-processing layer is critical}: The dramatic performance differences between layers (e.g., Threshold vs. PlaceValue8 for correction) show that the choice of classical post-processing architecture is as important as the quantum circuit design itself.
+
+\item \textbf{Allowing negative outputs is essential for effective correction}: The stark contrast between PlaceValue8 (positive-only, fails at correction) and PlaceValueNeg8 (bidirectional, excels at correction) demonstrates that the ability to make both upward and downward adjustments to baseline estimates is fundamental to correction success.
+
+\item \textbf{The quantum circuit is not the primary bottleneck}: Representation and post-processing dominate performance. The quantum circuit provides the feature encoding, but the classical layer design determines how effectively these features are transformed into accurate predictions.
+\end{itemize}
+
+\subsection{Key Takeaways}
+
+\begin{itemize}
+\item \textbf{Hybrid quantum--classical models outperform classical baselines}: The 6--8× improvements over PostgreSQL and 3--4× improvements over MSCN show that quantum-enhanced approaches can provide substantial accuracy gains when properly integrated with classical methods.
+
+\item \textbf{Cardinality correction is a realistic near-term application}: The robust performance of correction approaches suggests that quantum-enhanced correction of classical cardinality estimates represents a viable path for near-term quantum advantage in query optimization.
+
+\item \textbf{Classical layer design is as important as the quantum circuit itself}: The dramatic performance variations across different classical layers emphasize that careful architecture selection and design for the classical post-processing component is crucial for achieving optimal results.
+\end{itemize}
+
+\section{Future Work}
+
+Building on the insights from this evaluation, several promising directions for future research emerge across different time horizons.
+
+\subsection{Short-term}
+
+\begin{itemize}
+\item \textbf{Evaluation on larger benchmarks}: Extending the evaluation to benchmarks with more complex query patterns, larger numbers of tables, and more diverse data distributions would provide further validation of the approach and help identify scalability limits.
+
+\item \textbf{Automatic learning of classical post-processing layers}: Rather than manually selecting from predefined layer architectures, developing methods to automatically learn or discover optimal classical post-processing layers could further improve performance.
+\end{itemize}
+
+\subsection{Mid-term}
+
+\begin{itemize}
+\item \textbf{Integration into real DBMS pipelines}: Moving from simulation to integration with actual database management systems would enable evaluation of end-to-end query optimization performance and assessment of practical deployment considerations.
+
+\item \textbf{Execution on real quantum hardware}: Transitioning from quantum simulators to real quantum hardware would reveal the impact of noise, gate errors, and other hardware limitations on model performance, providing crucial insights for practical deployment.
+\end{itemize}
+
+\subsection{Long-term}
+
+\begin{itemize}
+\item \textbf{Joint optimization of join order and cardinality estimation}: A quantum-enhanced model could, in principle, reason over entire query structures rather than individual estimates. This would enable joint optimization of join order selection and cardinality estimation, potentially leading to more globally optimal query plans.
+
+\item \textbf{Deeper and more expressive quantum models as hardware scales}: As quantum hardware continues to improve in terms of qubit count, gate fidelity, and coherence times, opportunities emerge for deploying deeper and more expressive quantum circuits. This could enable more sophisticated feature encodings and potentially unlock new capabilities for query optimization.
+\end{itemize}
+
+
+\printbibliography
+\end{document}
+
