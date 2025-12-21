@@ -2,9 +2,6 @@
 pyrightconfig.json
 settings.json
 
-analysis/figures/
-analysis/results_summary.md
-
 .DS_Store
 **/.DS_Store
 

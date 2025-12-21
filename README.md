@@ -61,10 +61,10 @@ This fork extends the original implementation with:
 - LaTeX documentation of the hybrid quantum-classical model and experiments
 
 ### Documentation
-- `docs/01_preliminaries.tex`: Background and related work
-- `docs/02_hybrid_model.tex`: Compact encoding and hybrid VQC model
-- `docs/03_evaluation.tex`: Experimental setup and results
+- `docs/01_preliminaries.pdf`: Background and related work
+- `docs/02_hybrid_model.pdf`: Compact encoding and hybrid VQC model
+- `docs/03_evaluation.pdf`: Experimental setup and results
 
 ### Analysis
-- `analysis/`: Evaluation plots and post-processing scripts
+- `analysis/`: Evaluation plots and post-processing scripts 
 

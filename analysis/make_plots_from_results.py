@@ -6,10 +6,10 @@ Creates two types of plots for the best results:
 - Prediction quality (true vs predicted scatter + error distribution)
 
 Generates plots for:
-- 2 best JOB-light Correction results
-- 2 best JOB-light Estimation results
-- 2 best STATS Correction results
-- 2 best STATS Estimation results
+- Best JOB-light Correction result
+- Best JOB-light Estimation result
+- Best STATS Correction result
+- Best STATS Estimation result
 """
 
 import numpy as np
@@ -341,10 +341,10 @@ def main():
             continue
     
     categories_to_plot = [
-        ('JOB-light', 'rowFactor', 2, 'Correction'),
-        ('JOB-light', 'rows', 2, 'Estimation'),
-        ('STATS', 'rowFactor', 2, 'Correction'),
-        ('STATS', 'rows', 2, 'Estimation')
+        ('JOB-light', 'rowFactor', 1, 'Correction'),
+        ('JOB-light', 'rows', 1, 'Estimation'),
+        ('STATS', 'rowFactor', 1, 'Correction'),
+        ('STATS', 'rows', 1, 'Estimation')
     ]
     
     for benchmark, value_type, num_best, type_name in categories_to_plot:
@@ -368,7 +368,8 @@ def main():
                 layer = result['layer']
                 suffix = f" - {benchmark} {type_name} - {layer}"
                 
-                plot_a_path = figures_dir / f"{base_name}_training_curve.png"
+                title_for_filename = f"{benchmark}_{type_name}_{layer}".replace(" ", "_").replace("-", "_")
+                plot_a_path = figures_dir / f"{title_for_filename}_training_curve.png"
                 plot_training_curve(
                     train_data['episode'],
                     train_data['loss'],
@@ -378,7 +379,7 @@ def main():
                 )
                 
                 sol_data = load_solutions(sol_file)
-                plot_b_path = figures_dir / f"{base_name}_prediction_quality.png"
+                plot_b_path = figures_dir / f"{title_for_filename}_prediction_quality.png"
                 
                 plot_prediction_quality(
                     sol_data['true'],
