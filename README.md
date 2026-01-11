@@ -33,14 +33,16 @@ The settings can be added in the file or passed as command line arguments e.g.
 
 For numEpiosdes=8000 and reps=16 this can take up to 2 days to finish.
 
-### Dataformat
+### Documentation
 
+All extended documentation is provided as PDFs in the docs/ directory:
 - **`docs/explanation_hybrid_model.pdf`**: Technical explanation of the hybrid quantum-classical architecture, including compact encoding strategies and the variational quantum circuit design.
 
 - **`docs/evaluation.pdf`**: Comprehensive evaluation report comparing QCardEst and QCardCorr on JOB-light and STATS benchmarks, analyzing the impact of different post-processing layers on estimation and correction accuracy.
 
 ### Code Documentation
 
+Additional implementation-level documentation is provided in the analysis/ directory:
 - **`analysis/COMPUTATION_GUIDE.pdf`**: Guide to key computation functions, entry points, and the difference between QCardEst and QCardCorr implementations.
 
 - **`analysis/EXPERIMENTAL_SETUP.pdf`**: Documentation of experimental setup parameters, their locations in the codebase, and configuration options.
@@ -49,12 +51,12 @@ For numEpiosdes=8000 and reps=16 this can take up to 2 days to finish.
 
 The `analysis/` directory contains:
 
-- **Plot generation scripts**: Python scripts for creating training curves and prediction quality visualizations
+- **Plot generation scripts**: 
   - `make_plots_from_results.py`: Main plotting script
   - `create_job_light_figure.py`: JOB-light specific visualizations
   - `create_stats_figure.py`: STATS benchmark visualizations
 
-- **Generated figures**: Performance plots comparing different configurations
+- **Generated figures**: 
   - Training curves for estimation and correction tasks
   - Prediction quality metrics
   - Classical layer comparison analyses
