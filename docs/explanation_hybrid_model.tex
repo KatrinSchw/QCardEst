@@ -1,0 +1,457 @@
+% qcardest_qcardcorr_technical_notes.tex
+
+\documentclass[11pt,a4paper]{article}
+
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{lmodern}
+\usepackage{microtype}
+\usepackage{geometry}
+\geometry{margin=2.5cm}
+
+\usepackage{amsmath,amssymb,mathtools}
+\usepackage{bm}
+\usepackage{booktabs}
+\usepackage{listings}
+\usepackage{xcolor}
+
+\usepackage[style=numeric,backend=biber]{biblatex}
+\addbibresource{references.bib}
+
+\usepackage[
+  colorlinks=true,
+  linkcolor=black,
+  citecolor=black,
+  urlcolor=blue,
+  pdfborder={0 0 0}
+]{hyperref}
+
+\usepackage{cleveref}
+
+\lstdefinelanguage{SQL}{
+  morekeywords={SELECT,FROM,WHERE,AND,OR,JOIN,ON,AS,IN,NOT,NULL,LIKE,GROUP,BY,ORDER,LIMIT},
+  sensitive=false,
+  morecomment=[l]{--},
+  morestring=[b]'
+}
+\lstset{
+  basicstyle=\ttfamily\small,
+  columns=fullflexible,
+  frame=single,
+  breaklines=true,
+  keywordstyle=\color{blue},
+  commentstyle=\color{gray},
+  stringstyle=\color{teal}
+}
+
+\title{Technical Explanation of QCardEst and QCardCorr:\\Hybrid Quantum--Classical Cardinality Estimation}
+\author{Based on \emph{QCardEst/QCardCorr: Quantum Cardinality Estimation and Correction}\cite{winker2025qcardest}}
+\date{\today}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+This document explains the technical mechanism of the two models proposed in the paper \emph{QCardEst/QCardCorr: Quantum Cardinality Estimation and Correction} \cite{winker2025qcardest}.
+Both models are query-driven hybrid quantum--classical regressors built from three components: (i) a compact query encoding that maps an SQL join query to an $n$-qubit quantum state using one qubit per table, (ii) a variational quantum circuit (VQC) that transforms the encoded state using trainable parameters, and (iii) a classical post-processing layer that converts measurement probabilities into a single real-valued output.
+QCardEst predicts a query cardinality directly; QCardCorr predicts a multiplicative correction factor for an existing classical estimator.
+\end{abstract}
+
+\tableofcontents
+
+\section{Problem Setting}
+Cardinality estimation predicts the number of rows produced by a query plan operator (especially joins). These estimates steer join order selection and physical operator choices.
+Classical estimators often rely on simplifying assumptions (for example, independence assumptions) and can exhibit large errors on correlated data or complex predicates.
+The paper proposes two quantum machine learning models to learn a mapping from query features to cardinality values in a query-driven manner.
+
+\section{Related Work (Positioning)}
+The authors of the paper \cite{winker2025qcardest} contrast their approach with two prior quantum cardinality estimators:
+\begin{itemize}
+    \item \textbf{SQL2Circuits} \cite{uotila2023sql2circuits} encodes query syntax via grammar-based compilation into parameterized circuits and performs classification into cardinality bins rather than regression.
+    \item \textbf{QardEst} \cite{kittelmann2024qardest} replaces parts of MSCN with many small quantum circuits and pools their outputs; it inherits a high-dimensional encoding and requires multiple circuits per query.
+  \end{itemize}A key design goal of QCardEst/QCardCorr is feasibility on near-term devices: process a complete join query with a single VQC, which motivates a compact encoding.\label{sec:related}
+
+  \section{Quantum Background and Hybrid Learning}
+
+  \subsection{From Classical Queries to Quantum States}
+  
+  Quantum computers operate on qubits rather than classical numbers.
+  A single qubit has two computational basis states, $\lvert 0 \rangle$ and $\lvert 1 \rangle$,
+  but it can also exist in a superposition of both:
+  \begin{equation}
+  \lvert \psi \rangle = a_0 \lvert 0 \rangle + a_1 \lvert 1 \rangle,
+  \quad \text{with } |a_0|^2 + |a_1|^2 = 1.
+  \end{equation}
+  
+  The coefficients $a_0$ and $a_1$ are called \emph{amplitudes}.
+  Measuring the qubit collapses the state to $\lvert 0 \rangle$ with probability $|a_0|^2$
+  or to $\lvert 1 \rangle$ with probability $|a_1|^2$.
+  
+  When we move from a single qubit to multiple qubits, an important property emerges.
+  A system of $n$ qubits is described by a joint quantum state with $2^n$ amplitudes:
+  \begin{equation}
+  \lvert \psi \rangle = \sum_{i=0}^{2^n-1} a_i \lvert i \rangle,
+  \quad \sum_{i=0}^{2^n-1} |a_i|^2 = 1.
+  \end{equation}
+  
+  This exponential state space allows a small number of qubits to represent
+  a large number of joint configurations at the same time.
+  Our goal is to define such a quantum state so that its amplitudes encode
+  the structure of an SQL query.\cite{winker2025qcardest}
+
+  \section{Compact Query Encoding}
+
+  \subsection{Design Principle}
+  
+  Not every part of an SQL query affects the result cardinality.
+  Encoding unnecessary information would waste qubits and circuit depth,
+  which is infeasible on current quantum hardware.
+  
+  The compact encoding therefore follows a strict rule:
+  \emph{only encode query components that influence cardinality}.
+  
+  Table~\ref{tab:encoding-relevance} summarizes which query parts are relevant.
+  
+  \begin{table}[h]
+  \centering
+  \begin{tabular}{lll}
+  \toprule
+  Query Part & Affects Cardinality & Encoding Decision \\
+  \midrule
+  Selected columns & No & Ignored \\
+  Tables & Yes & Each table gets an ID $t_i$ \\
+  Join conditions & Yes & Ignored under PK--FK assumption \\
+  Filter predicates & Yes & Aggregated into selectivity $s_i$ \\
+  \bottomrule
+  \end{tabular}
+  \caption{Compact encoding only retains query parts relevant for cardinality.}
+  \label{tab:encoding-relevance}
+  \end{table}
+
+  \subsection{Reducing a Query to $2n$ Classical Values}
+
+  Consider a join query over $n$ tables.
+  After removing irrelevant components, the query is reduced to exactly
+  two values per table:
+  \begin{itemize}
+  \item a table identifier $t_i$
+  \item a selectivity value $s_i \in [0,1]$ representing the fraction of rows that remain after filtering
+  \end{itemize}
+  
+  All filters on the same table are combined into a single selectivity.
+  As a result, a query over $n$ tables is reduced to $2n$ classical values:
+  \[
+  (t_0,s_0), (t_1,s_1), \dots, (t_{n-1},s_{n-1}).
+  \]
+  
+  This reduction step is essential because it ensures that the size of the
+  quantum input grows linearly with the number of tables.
+
+  \subsection{Encoding Two Values into One Qubit}
+
+  Each table is assigned exactly one qubit.
+  Two values are encoded on the same qubit using rotation gates
+  around different axes of the Bloch sphere.
+  
+  \begin{itemize}
+  \item the table identifier $t_i$ is encoded using a rotation around the $x$-axis
+  \item the selectivity $s_i$ is encoded using a rotation around the $z$-axis
+  \end{itemize}
+  
+  Both values are first scaled so that the resulting rotation angles
+  remain strictly below $2\pi$.
+  
+  Formally, the encoding applied to qubit $i$ is
+  \begin{equation}
+  U_e^{(i)}(t_i,s_i) = R_x(\alpha_i)\,R_z(\beta_i),
+  \end{equation}
+  where $\alpha_i$ encodes the table identifier and $\beta_i$ encodes the selectivity.
+  
+  The encoding of the full query is the joint $n$-qubit operation
+  \begin{equation}
+  U_e(x) = \prod_{i=1}^{n} R_x(\alpha_i) R_z(\beta_i).
+  \end{equation}
+  The product denotes that each pair of rotations is applied independently to its corresponding qubit.
+  
+  This means:
+  \begin{itemize}
+  \item one qubit per table
+  \item one rotation gate per encoded value
+  \item linear scaling in the number of tables
+  \end{itemize}
+
+
+  \subsection{Why the Encoding Is Compact}
+
+The proposed encoding satisfies all required properties for near-term feasibility \cite{winker2025qcardest}:
+
+\begin{itemize}
+\item \textbf{Uniqueness:} Different $(t_i,s_i)$ pairs map to different rotation angles,
+which makes the encoding injective.
+\item \textbf{Qubit complexity:} Exactly one qubit per table is used.
+\item \textbf{Circuit depth:} Each value is encoded with a single rotation gate.
+\end{itemize}
+
+As a result, the ratio between tables and qubits is exactly $1{:}1$,
+allowing a complete SQL query to be processed by a single variational quantum circuit.\cite{winker2025qcardest}
+
+
+\section{Variational Quantum Circuit Architecture}
+
+\subsection{Encoding Layer}
+
+The encoding layer $U_e(x)$ initializes the quantum system.
+It performs the compact query encoding and creates an initial superposition
+whose amplitudes reflect the structure of the query.
+
+\subsection{Computation Layer}
+
+The computation layer $U(\theta)$ contains the trainable parameters.
+It combines:
+\begin{itemize}
+\item parameterized single-qubit rotation gates
+\item controlled Pauli gates that entangle qubits
+\end{itemize}
+
+The purpose of this layer is to learn correlations between tables.
+Entanglement is crucial here because join cardinalities depend on
+interactions between tables rather than independent behavior.
+
+\subsection{Measurement Layer}
+
+Measurement collapses the quantum superposition into classical bit strings.
+For $n$ qubits, each measurement yields an $n$-bit outcome,
+and repeating the circuit produces a probability vector
+\[
+\bm{x} \in [0,1]^{2^n}, \quad \sum_i x_i = 1.
+\]
+
+This probability vector captures the information learned by the quantum model
+and is passed to the classical post-processing layer.\cite{winker2025qcardest}
+
+\section{Classical Post-Processing Layer}
+\label{sec:classical-layer}
+
+The variational quantum circuit outputs a probability vector
+$\bm{x}$ whose entries lie in $[0,1]$ and sum to $1$.
+Cardinality estimation, however, requires a single real-valued scalar.
+The classical post-processing layer therefore acts as a decoder that
+maps the quantum measurement output to a numeric estimate.
+
+Different post-processing functions induce different output ranges
+and numeric distributions, which significantly influences estimation
+accuracy. For this reason, the paper evaluates multiple post-processing
+strategies rather than committing to a single fixed mapping.
+We briefly summarize the intuition behind each family below and refer
+to the original paper for the exact mathematical definitions.\cite{winker2025qcardest}
+
+\subsection{Linear Mapping}
+The linear layer produces a cardinality estimate by scaling a single
+probability component.
+It is simple and stable, but its output range is bounded, which can
+limit expressiveness for large cardinalities or strong corrections.
+
+\subsection{Rational and RationalLog Mappings}
+Rational mappings compute a ratio between probability components.
+This allows the output to grow or shrink dynamically and supports
+unbounded ranges.
+The logarithmic variant maps ratios to a symmetric real scale,
+which is particularly useful when modeling multiplicative correction
+factors that may be greater or smaller than one.
+
+\subsection{Threshold-Based Mappings}
+Threshold-based layers introduce conditional behavior.
+One probability component acts as a gate that determines whether another
+component contributes to the output.
+This results in piecewise behavior, enabling the model to represent
+abrupt changes or regime shifts in cardinality, such as systematic
+underestimation or overestimation patterns.
+
+\subsection{Place-Value Mappings}
+Place-value mappings interpret multiple probability components as
+digits in a positional number system.
+By combining several outputs with increasing weights, these layers
+can represent a wide numeric range.
+Extended variants allow negative contributions, which is especially
+important for correction tasks where the output may need to scale
+estimates downward.
+
+\section{Model 1: QCardEst (Direct Cardinality Estimation)}
+
+QCardEst is a query-driven hybrid quantum--classical regression model that
+predicts the cardinality of an SQL join query directly.
+It builds on the components introduced in the previous sections:
+compact query encoding, a variational quantum circuit, and a classical
+post-processing layer.
+
+Given a query $q$, the encoding and VQC produce a probability vector
+$\bm{x}(q;\theta)$.
+The classical post-processing layer then maps this vector to a scalar
+cardinality estimate $\hat{t}(q)$:
+\begin{equation}
+  \hat{t}(q) = h\big(\bm{x}(q;\theta); \phi\big),
+\end{equation}
+where $\theta$ denotes the trainable parameters of the quantum circuit and
+$\phi$ denotes the parameters of the classical post-processing function
+(for example scaling constants or thresholds).
+
+\paragraph{Training objective.}
+QCardEst is trained on a workload $Q$ of queries with known true
+cardinalities $t(q)$.
+The parameters of both the quantum circuit and the classical layer
+are optimized jointly by minimizing a regression loss:
+\begin{equation}
+  \min_{\theta,\phi} \sum_{q \in Q} e\big(\hat{t}(q),\, t(q)\big).
+\end{equation}
+
+\paragraph{Feasibility.}
+A central benefit of QCardEst is its feasibility on near-term quantum
+hardware.
+As shown in \cref{sec:related} and the compact encoding section,
+a query joining $n$ tables is processed using exactly $n$ qubits
+and a single variational quantum circuit.
+This distinguishes QCardEst from prior quantum approaches that require
+multiple circuits or encodings whose size grows with query complexity.\cite{winker2025qcardest}
+
+
+\section{Model 2: QCardCorr (Cardinality Correction Factor)}
+
+QCardCorr addresses the same task as QCardEst but follows a different
+modeling strategy.
+Instead of predicting cardinalities from scratch, it learns to correct
+the output of an existing classical estimator.
+
+Let $f(q)$ denote the cardinality estimate produced by a classical query
+optimizer (for example PostgreSQL), and let $t(q)$ be the true result.
+QCardCorr predicts a multiplicative correction factor $g_x(q)$ such that
+\begin{equation}
+  \hat{t}(q) = f(q)\cdot g_x(q).
+\end{equation}
+
+\paragraph{Training objective.}
+During training, the classical estimator $f$ is kept fixed.
+Only the parameters $x$ of the quantum correction model are optimized:
+\begin{equation}
+  \min_{x} \sum_{q \in Q} e\big(f(q)\cdot g_x(q),\, t(q)\big).
+\end{equation}
+
+The optimal correction factor for a query $q$ is
+\begin{equation}
+  g^*(q) = \frac{t(q)}{f(q)},
+\end{equation}
+which means that training can be interpreted as learning to approximate
+the ratio between the true and the estimated cardinality.
+
+\paragraph{Why correction is easier than direct estimation.}
+Correction factors live in $\mathbb{Q}^+$ and are centered around $1$
+for a reasonably accurate baseline estimator.
+This substantially simplifies the learning task compared to predicting
+absolute cardinalities.
+To further stabilize training, the authors of the paper \cite{winker2025qcardest} apply a logarithmic
+transformation, mapping correction factors to $\mathbb{R}$ and assigning
+the neutral value $0$ to perfectly corrected predictions.
+
+
+\section{End-to-End Example (Running Query)}
+
+To illustrate how all components interact, we consider a single running
+example throughout the pipeline:
+\begin{lstlisting}[language=SQL]
+SELECT *
+FROM Movies M, Ratings R, Users U
+WHERE M.id = R.movie_id
+  AND R.user_id = U.id
+  AND M.year > 2000
+  AND U.country = 'Germany';
+\end{lstlisting}
+
+\paragraph{Encoding.}
+The query joins three tables, so the compact encoding uses three qubits.
+Tables $(M,R,U)$ are mapped to identifiers $(t_0,t_1,t_2)$, and all filters
+on each table are aggregated into selectivities $(s_0,s_1,s_2)$.
+Each qubit $i$ encodes its corresponding $(t_i,s_i)$ pair using rotations
+$R_x(\alpha(t_i))$ and $R_z(\beta(s_i))$.
+
+\paragraph{VQC and measurement.}
+The encoded quantum state is processed by the variational quantum circuit,
+which applies parameterized rotations and entangling gates to learn
+correlations between tables.
+After repeated circuit executions, measurement yields a probability
+distribution over all computational basis states.
+
+For a query encoded using $n=3$ qubits, the measurement output is a
+probability vector of dimension $2^3 = 8$.
+For illustration, consider the following example output:
+\begin{equation}
+  \bm{x} =
+  [0.18,\;0.07,\;0.12,\;0.21,\;0.05,\;0.14,\;0.09,\;0.14],
+\end{equation}
+where each entry corresponds to one of the eight possible basis states
+and the entries sum to one.
+
+\paragraph{Classical decoding.}
+The probability vector is converted into a scalar using the selected
+post-processing layer.
+A linear layer might scale a single component, a rational layer might
+form a ratio of components, and a place-value layer would combine
+multiple components as weighted digits.
+
+\paragraph{Correction view.}
+Assume a classical optimizer predicts $f(q)=3$ rows, while the true
+cardinality is $t(q)=4$.
+The optimal correction factor for this query is therefore
+$g^*(q)=t(q)/f(q)=4/3 \approx 1.33$.
+
+In QCardCorr, the query is encoded and processed by the same VQC
+architecture described above.
+After measurement, the circuit produces a probability vector
+$\bm{x}(q)$, which is mapped by the classical post-processing layer to
+a predicted correction factor $g(q)$.
+If the model outputs $g(q)\approx 1.30$, the final estimate becomes
+$f(q)\cdot g(q)\approx 3.9$, which is much closer to the true
+cardinality than the original estimate.
+
+This illustrates how QCardCorr uses the quantum model to learn and apply
+systematic corrections to a fixed classical estimator.
+
+\section{Implementation and Training}
+
+Both QCardEst and QCardCorr are trained using the same hybrid
+quantum--classical workflow.
+They share the same model components and differ only in what the model
+is trained to predict: an absolute cardinality value in QCardEst, and a
+multiplicative correction factor in QCardCorr.
+
+\paragraph{Training loop.}
+Each training iteration follows the same sequence of steps:
+\begin{enumerate}
+  \item extract the query features $(t_i,s_i)$ and encode them into qubits
+        using the compact encoding $U_e(x)$,
+  \item apply the variational computation layer $U(\theta)$ with
+        parameterized rotations and entangling gates,
+  \item measure the circuit repeatedly to obtain a probability vector
+        $\bm{x}$,
+  \item convert $\bm{x}$ into a scalar using the selected classical
+        post-processing function,
+  \item compute the loss and update parameters with a classical optimizer.
+\end{enumerate}
+
+This loop is executed on classical hardware using a quantum circuit
+simulator.
+A detailed empirical evaluation, including benchmarks and quantitative
+results, is reported separately in the document
+\emph{Evaluation of QCardEst/QCardCorr on JOB-light and STATS Benchmarks}.
+
+\paragraph{Summary.}
+QCardEst and QCardCorr rely on the same hybrid architecture consisting of
+compact query encoding, a variational quantum circuit, and a classical
+post-processing layer.
+QCardEst learns to predict cardinalities directly, while QCardCorr learns
+how to adjust an existing estimator.
+The compact encoding is the main factor that makes both approaches
+practical, as it allows complete SQL join queries to be processed using
+a single quantum circuit on near-term hardware.\cite{winker2025qcardest}
+
+\printbibliography
+
+\end{document}
