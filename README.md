@@ -1,4 +1,17 @@
-# QCardEst
+# QCardEst/QCardCorr
+
+This repository is a research fork of the original **QCardEst/QCardCorr** implementation by Winker et al. The project implements hybrid quantum-classical machine learning models for cardinality estimation and correction in database query optimization.
+
+**Original paper:**
+> T. Winker et al., *QCardEst/QCardCorr: Quantum Cardinality Estimation and Correction*
+
+This fork extends the original implementation with:
+- Extended experimental evaluation on JOB-light and STATS benchmarks
+- Comprehensive documentation of the hybrid quantum-classical model architecture
+- Reproducible analysis scripts and visualization tools
+- Detailed evaluation reports with performance comparisons
+
+All original concepts and methods are credited to the authors.
 
 ## Installation
 
@@ -22,49 +35,38 @@ For numEpiosdes=8000 and reps=16 this can take up to 2 days to finish.
 
 ### Dataformat
 
-The data files contain 6 columns seperated by ','
+- **`docs/explanation_hybrid_model.pdf`**: Technical explanation of the hybrid quantum-classical architecture, including compact encoding strategies and the variational quantum circuit design.
 
-1. Column : Tablenames of the query seperated by ';'
-2. Column : Selectivities for the tables seperated by ';'
-3. Column : Cost calculated by PostgreSQL
-4. Column : Cardinality prediction of PostgreSQL/MSCN
-5. Column : Actual execution time
-6. Column : True cardinality
+- **`docs/evaluation.pdf`**: Comprehensive evaluation report comparing QCardEst and QCardCorr on JOB-light and STATS benchmarks, analyzing the impact of different post-processing layers on estimation and correction accuracy.
 
-### Settings
-    
-The important setting options are:
+### Code Documentation
 
-- data: The datafile which should be used 
-    - jobSimple/job : JOB-light benchmark with PostgreSQL as classical base
-    - jobSimple/mscnCosts : JOB-light benchmark with PostgreSQL as classical base
-    - stats/statsCards6 : STATS benchmark with up to 6 tables in query
-    - stats/stats4 : STATS benchmark with exactly 4 tables in query
-    - stats/statCards : STATS benchmark with all queries (up to 7 tables query)
-    
-- valueType : select cost to predict and method of predicting
-    - rows : Cardinality prediction
-    - rowFactor : Cardinality correction
-    - cost : Execution time prediction
-    - costFactor : Execution time calculation from predicted cost
+- **`analysis/COMPUTATION_GUIDE.pdf`**: Guide to key computation functions, entry points, and the difference between QCardEst and QCardCorr implementations.
 
-- numEpisodes : Number of episodes the optimizer runs
-- loss : Classical post-processing layer
-- prefix : Prefix for the result filename
-- reps : Number of layers of the VQC 
+- **`analysis/EXPERIMENTAL_SETUP.pdf`**: Documentation of experimental setup parameters, their locations in the codebase, and configuration options.
 
-## Additional Documentation and Analysis
+## Analysis and Results
 
-This fork extends the original implementation with:
-- Extended evaluation and analysis
-- Reproducible plots and experiment scripts
-- LaTeX documentation of the hybrid quantum-classical model and experiments
+The `analysis/` directory contains:
 
-### Documentation
-- `docs/01_preliminaries.pdf`: Background and related work
-- `docs/02_hybrid_model.pdf`: Compact encoding and hybrid VQC model
-- `docs/03_evaluation.pdf`: Experimental setup and results
+- **Plot generation scripts**: Python scripts for creating training curves and prediction quality visualizations
+  - `make_plots_from_results.py`: Main plotting script
+  - `create_job_light_figure.py`: JOB-light specific visualizations
+  - `create_stats_figure.py`: STATS benchmark visualizations
 
-### Analysis
-- `analysis/`: Evaluation plots and post-processing scripts 
+- **Generated figures**: Performance plots comparing different configurations
+  - Training curves for estimation and correction tasks
+  - Prediction quality metrics
+  - Classical layer comparison analyses
 
+## License
+
+This is a research fork. Please refer to the original repository for licensing information and cite the original paper when using this code.
+
+## Citation
+
+If you use this implementation, please cite:
+
+```
+T. Winker et al., "QCardEst/QCardCorr: Quantum Cardinality Estimation and Correction"
+```
